@@ -1,0 +1,18 @@
+# Dataset Folder
+safecast_data/
+
+#others
+__pycache__/
+*.pyc
+*.pyo
+.git
+.gitignore
+venv
+.env
+*.log
+__pycache__
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+node_modules

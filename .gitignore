@@ -1,0 +1,32 @@
+# macOS system files
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Virtual environments
+venv/
+env/
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# Data files
+data_provider/safecast_data/measurements-out.csv
+*.csv
+*.json
+*.xml
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+*.orig
