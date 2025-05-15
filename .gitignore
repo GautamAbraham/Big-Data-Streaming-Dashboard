@@ -23,7 +23,6 @@ env/
 # Data files
 data_provider/safecast_data/measurements-out.csv
 *.csv
-*.json
 *.xml
 
 # Temporary files
