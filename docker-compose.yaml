@@ -1,4 +1,17 @@
 services:
+
+  frontend:
+    build:
+      context: ./front_end
+      dockerfile: Dockerfile
+      args:
+        VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN}
+        VITE_API_URL:      ${VITE_API_URL}
+    ports:
+      - "3000:80"
+    environment:
+      - VITE_API_URL=${VITE_API_URL}
+
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     hostname: kafka
