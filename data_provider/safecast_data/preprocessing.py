@@ -15,7 +15,7 @@ df = pd.read_csv(
 
 
 # Filter out future or invalid timestamps
-df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], utc=True)
+df[TIMESTAMP_COL] = pd.to_datetime(df[TIMESTAMP_COL], format="mixed", dayfirst=False, utc=True)
 now = pd.Timestamp.now(tz="UTC")
 df = df[df[TIMESTAMP_COL] <= now]
 
