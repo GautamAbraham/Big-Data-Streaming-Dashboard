@@ -3,14 +3,14 @@ import sys
 
 INPUT_FILE = "measurements-out.csv"
 OUTPUT_FILE = "measurements-cleaned.csv"
-LIMIT = 2000000
 TIMESTAMP_COL = "Captured Time"
 
 
 df = pd.read_csv(
   INPUT_FILE,
   parse_dates=[TIMESTAMP_COL],
-  low_memory=False
+  low_memory=False,
+  nrows=2000000
 )
 
 
@@ -33,13 +33,6 @@ if null_count > 0:
 if not df[TIMESTAMP_COL].is_monotonic_increasing:
   print(f"Error: Timestamps in '{TIMESTAMP_COL}' are not fully sorted ascending!")
   sys.exit(1)
-
-
-# Truncate if above limit
-total = len(df)
-if total > LIMIT:
-  df = df.iloc[:LIMIT]
-
 
 # Write out cleaned data
 df.to_csv(OUTPUT_FILE, index=False)
