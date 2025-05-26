@@ -7,7 +7,7 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install apache-flink==1.18
+RUN pip3 install apache-flink==1.18 python-dateutil pytz
 
 # Create a symbolic link so that 'python' points to 'python3'
 RUN ln -sf /usr/bin/python3 /usr/bin/python

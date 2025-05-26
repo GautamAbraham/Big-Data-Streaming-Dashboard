@@ -21,7 +21,7 @@ env/
 .idea/
 
 # Data files
-data_provider/safecast_data/measurements-out.csv
+data_provider/safecast_data/
 *.csv
 *.xml
 

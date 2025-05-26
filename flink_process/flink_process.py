@@ -1,5 +1,5 @@
 from pyflink.datastream import StreamExecutionEnvironment
-from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer
+from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer, FlinkKafkaProducer
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.typeinfo import Types
 from pyflink.datastream.functions import MapFunction
@@ -10,6 +10,9 @@ import os
 import sys
 import traceback
 import math
+from datetime import datetime
+import dateutil.parser
+import pytz
 
 # Set up basic logging for Flink
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -46,8 +49,8 @@ class CleanKafkaJSON(MapFunction):
 
             # Extract and validate numerical fields
             try:
-                lat = float(data.get("latitude"))
-                lon = float(data.get("longitude"))
+                lat = round(float(data.get("latitude")), 5)
+                lon = round(float(data.get("longitude")), 5)
                 val = float(data.get("value"))
             except (TypeError, ValueError):
                 logging.warning(f"Invalid types in record: {data}")
@@ -62,6 +65,16 @@ class CleanKafkaJSON(MapFunction):
             timestamp = data.get("captured_time")
             if not timestamp:
                 logging.warning(f"Missing timestamp: {data}")
+                return None
+            # Normalize timestamp to ISO 8601 with timezone (UTC)
+            try:
+                dt = dateutil.parser.isoparse(timestamp)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=pytz.UTC)
+                dt_utc = dt.astimezone(pytz.UTC)
+                timestamp = dt_utc.isoformat()
+            except Exception as e:
+                logging.warning(f"Invalid timestamp format: {timestamp} in record: {data}")
                 return None
 
             # Unit validation: must be 'cpm' (case-insensitive)
@@ -78,8 +91,8 @@ class CleanKafkaJSON(MapFunction):
             # Assemble cleaned output
             cleaned = {
                 "timestamp": timestamp,
-                "lat": lat,
-                "lon": lon,
+                "lat": round(lat, 5),
+                "lon": round(lon, 5),
                 "value": val,
                 "unit": unit.lower(),  # normalize case
                 "loader_id": loader_id,
@@ -108,6 +121,7 @@ def main():
     try:
         kafka_topic = config['DEFAULT']['KAFKA_TOPIC']
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
+        kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         # Define the threshold for dangerous radiation levels.
         danger_threshold = 1000.0
     except KeyError as e:
@@ -131,11 +145,20 @@ def main():
     # Use the CleanKafkaJSON class, passing the threshold value. 
     cleaned_stream = ds.map(CleanKafkaJSON(danger_threshold), output_type=Types.STRING()) \
                     .filter(lambda x: x is not None)  # Filter out None values (invalid records)
-    
+
+    # --- Output to another Kafka topic ---
+    producer = FlinkKafkaProducer(
+        topic=kafka_output_topic,
+        serialization_schema=SimpleStringSchema(),
+        producer_config={
+            'bootstrap.servers': kafka_bootstrap_servers
+        }
+    )
+    cleaned_stream.add_sink(producer)
+
     # --- Output for testing ---
     # cleaned_stream.print()
-
-    cleaned_stream.map(lambda x: f"Processed: {x}").print()
+    # cleaned_stream.map(lambda x: f"Processed: {x}").print()
 
     env.execute("Radiation Monitoring Flink Job")
 
