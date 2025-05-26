@@ -54,5 +54,44 @@ services:
       kafka:
         condition: service_healthy
 
+  flink-jobmanager:
+    build:
+      context: ./flink_process
+      dockerfile: Dockerfile
+    container_name: jobmanager
+    hostname: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+    command: jobmanager
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  flink-taskmanager:
+    build:
+      context: ./flink_process
+      dockerfile: Dockerfile
+    container_name: flink-taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+    command: taskmanager
+
+  flink-processor:
+    build:
+      context: ./flink_process
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      flink-jobmanager:
+        condition: service_started
+    volumes:
+      - ./flink_process:/opt/flink/usrlib
+
 volumes:
   kafka_data:
