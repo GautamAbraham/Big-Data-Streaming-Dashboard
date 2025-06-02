@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import ReactMapGL, { Source, Layer, Marker } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-export default function MapView() {
+export default function MapView({ userLocation, setUserLocation }) {
   const mapRef = useRef();
-  const [userLocation, setUserLocation] = useState(null);
 
   const initialGeoJSON = {
     type: "FeatureCollection",
@@ -68,7 +67,7 @@ export default function MapView() {
           offsetLeft={-12}
           offsetTop={-24}
         >
-          <div className="h-6 w-6 bg-blue-500 rounded-full border-2 border-white shadow-lg" />
+          <div className="h-5 w-5 bg-blue-500 rounded-full border-2 border-white shadow-lg" />
         </Marker>
       )}
       

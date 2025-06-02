@@ -7,6 +7,7 @@ import Alerts from "./components/Alerts";
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userLocation, setUserLocation] = useState(null);
 
   // configuration states
   const [threshold, setThreshold] = useState(100);
@@ -53,17 +54,16 @@ function App() {
           )}
         </div>
 
+        {/* map section */}
         <div className="flex-1">
           <MapView
-            threshold={threshold}
-            bbox={{ north, south, east, west }}
-            timeWindow={{ start: startTime, end: endTime }}
-            playbackSpeed={playbackSpeed}
-            dataStream={dataStream}
+            userLocation={userLocation}
+            setUserLocation={setUserLocation}
           />
-          <Legend />
+          <Legend userLocation={userLocation} />
           <Alerts messages={alertMessages} />
         </div>
+
       </div>
     </div>
   );
