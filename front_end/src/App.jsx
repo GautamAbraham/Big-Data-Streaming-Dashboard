@@ -11,10 +11,6 @@ function App() {
 
   // configuration states
   const [threshold, setThreshold] = useState(100);
-  const [north, setNorth] = useState(90);
-  const [south, setSouth] = useState(-90);
-  const [east, setEast] = useState(180);
-  const [west, setWest] = useState(-180);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -36,14 +32,6 @@ function App() {
             <ConfigPanel
               threshold={threshold}
               setThreshold={setThreshold}
-              north={north}
-              setNorth={setNorth}
-              south={south}
-              setSouth={setSouth}
-              east={east}
-              setEast={setEast}
-              west={west}
-              setWest={setWest}
               startTime={startTime}
               setStartTime={setStartTime}
               endTime={endTime}

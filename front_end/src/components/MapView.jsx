@@ -52,7 +52,7 @@ export default function MapView({ userLocation, setUserLocation }) {
           id="radiation-points"
           type="circle"
           paint={{
-            "circle-radius": 4,
+            "circle-radius": 5,
             "circle-color": circleColor,
             "circle-opacity": 0.6,
           }}
