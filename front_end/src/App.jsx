@@ -3,9 +3,12 @@ import MapView from "./components/MapView";
 import Navbar from "./components/Navbar";
 import ConfigPanel from "./components/ConfigPanel";
 import Legend from "./components/Legend";
+import Alerts from "./components/Alerts";
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // configuration states
   const [threshold, setThreshold] = useState(100);
   const [north, setNorth] = useState(90);
   const [south, setSouth] = useState(-90);
@@ -15,6 +18,11 @@ function App() {
   const [endTime, setEndTime] = useState("");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [dataStream, setDataStream] = useState(null);
+
+  // Alerts state
+  const [alertQueue, setAlertQueue] = useState([]);
+  const [alertMessages, setAlertMessages] = useState([]);
+
 
   return (
     <div className="flex flex-col h-screen">
@@ -54,6 +62,7 @@ function App() {
             dataStream={dataStream}
           />
           <Legend />
+          <Alerts messages={alertMessages} />
         </div>
       </div>
     </div>
