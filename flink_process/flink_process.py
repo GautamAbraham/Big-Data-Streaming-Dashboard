@@ -86,12 +86,10 @@ class CleanKafkaJSON(MapFunction):
             # Level classsification based on value
             if val < 20:
                 level = "low"
-            elif 20 <= val < 60:
+            elif 20 <= val < self.threshold:
                 level = "moderate"
-            elif 60 <= val < self.threshold:
-                level = "high"
             else:
-                level = "dangerous"
+                level = "high"
             
             # Assemble cleaned output
             cleaned = {
@@ -128,7 +126,7 @@ def main():
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         # Define the threshold for dangerous radiation levels.
-        danger_threshold = 100.0
+        danger_threshold = 60.0
     except KeyError as e:
         logging.error(f"Missing configuration key: {e}. Please check your config file.")
         sys.exit(1)
