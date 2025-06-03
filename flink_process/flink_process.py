@@ -83,11 +83,14 @@ class CleanKafkaJSON(MapFunction):
                 logging.warning(f"Invalid unit (must be 'cpm'): {data}")
                 return None
 
-            # Handle loader_id safely
-            loader_id = data.get("loader_id", "unknown")
-            if loader_id is None or (isinstance(loader_id, float) and math.isnan(loader_id)):
-                loader_id = "unknown"
-
+            # Level classsification based on value
+            if val < 20:
+                level = "low"
+            elif 20 <= val < self.threshold:
+                level = "moderate"
+            else:
+                level = "high"
+            
             # Assemble cleaned output
             cleaned = {
                 "timestamp": timestamp,
@@ -95,7 +98,7 @@ class CleanKafkaJSON(MapFunction):
                 "lon": round(lon, 5),
                 "value": val,
                 "unit": unit.lower(),  # normalize case
-                "loader_id": loader_id,
+                "level": level,
                 "dangerous": val > self.threshold
             }
 
@@ -123,7 +126,7 @@ def main():
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         # Define the threshold for dangerous radiation levels.
-        danger_threshold = 1000.0
+        danger_threshold = 60.0
     except KeyError as e:
         logging.error(f"Missing configuration key: {e}. Please check your config file.")
         sys.exit(1)
