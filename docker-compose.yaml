@@ -93,5 +93,16 @@ services:
     volumes:
       - ./flink_process:/opt/flink/usrlib
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    ports:
+      - "8000:8000"
 volumes:
   kafka_data:

@@ -48,7 +48,7 @@ export default function MapView() {
       mapStyle="mapbox://styles/mapbox/light-v10"
       mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
     >
-      <Source id="radiation" type="geojson" data={initialGeoJSON}>
+      <Source id="radiation" type="geojson" data={geojson}>
         <Layer
           id="radiation-points"
           type="circle"
