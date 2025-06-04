@@ -3,7 +3,7 @@ import sys
 
 INPUT_FILE = "measurements-out.csv"
 OUTPUT_FILE = "measurements-cleaned.csv"
-TIMESTAMP_COL = "Captured Time"
+TIMESTAMP_COL = "Upload Time"
 
 
 df = pd.read_csv(
