@@ -1,7 +1,13 @@
-const Legend = () => {
+const Legend = ({ userLocation }) => {
   return (
     <div className="absolute bottom-4 right-4 bg-white bg-opacity-90 p-3 rounded shadow">
-      <h3 className="font-semibold mb-2">{"Radiation Levels"}</h3>
+      
+      {userLocation && (
+        <div className="flex items-center mb-1">
+          <span className="inline-block w-3 h-3 bg-blue-500 rounded-full mr-2" />{" "}
+          {"Current Location"}
+        </div>
+      )}
 
       <div className="flex items-center mb-1">
         <span className="inline-block w-3 h-3 bg-green-500 rounded-full mr-2" />{" "}

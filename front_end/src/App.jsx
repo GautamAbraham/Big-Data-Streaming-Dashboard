@@ -7,13 +7,10 @@ import Alerts from "./components/Alerts";
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userLocation, setUserLocation] = useState(null);
 
   // configuration states
   const [threshold, setThreshold] = useState(100);
-  const [north, setNorth] = useState(90);
-  const [south, setSouth] = useState(-90);
-  const [east, setEast] = useState(180);
-  const [west, setWest] = useState(-180);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -35,14 +32,6 @@ function App() {
             <ConfigPanel
               threshold={threshold}
               setThreshold={setThreshold}
-              north={north}
-              setNorth={setNorth}
-              south={south}
-              setSouth={setSouth}
-              east={east}
-              setEast={setEast}
-              west={west}
-              setWest={setWest}
               startTime={startTime}
               setStartTime={setStartTime}
               endTime={endTime}
@@ -53,17 +42,16 @@ function App() {
           )}
         </div>
 
+        {/* map section */}
         <div className="flex-1">
           <MapView
-            threshold={threshold}
-            bbox={{ north, south, east, west }}
-            timeWindow={{ start: startTime, end: endTime }}
-            playbackSpeed={playbackSpeed}
-            dataStream={dataStream}
+            userLocation={userLocation}
+            setUserLocation={setUserLocation}
           />
-          <Legend />
+          <Legend userLocation={userLocation} />
           <Alerts messages={alertMessages} />
         </div>
+
       </div>
     </div>
   );

@@ -3,14 +3,6 @@ function ConfigPanel({
   setFilterLevel,
   threshold,
   setThreshold,
-  north,
-  setNorth,
-  south,
-  setSouth,
-  east,
-  setEast,
-  west,
-  setWest,
   startTime,
   setStartTime,
   endTime,
@@ -48,40 +40,6 @@ function ConfigPanel({
           onChange={(e) => setThreshold(Number(e.target.value))}
           className="w-full border rounded px-2 py-1"
         />
-      </div>
-
-      <div className="mb-6">
-        <label className="block mb-1 font-medium">{"Bounding Box (°):"}</label>
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            type="number"
-            placeholder="North"
-            value={north}
-            onChange={(e) => setNorth(Number(e.target.value))}
-            className="border rounded px-2 py-1"
-          />
-          <input
-            type="number"
-            placeholder="South"
-            value={south}
-            onChange={(e) => setSouth(Number(e.target.value))}
-            className="border rounded px-2 py-1"
-          />
-          <input
-            type="number"
-            placeholder="East"
-            value={east}
-            onChange={(e) => setEast(Number(e.target.value))}
-            className="border rounded px-2 py-1"
-          />
-          <input
-            type="number"
-            placeholder="West"
-            value={west}
-            onChange={(e) => setWest(Number(e.target.value))}
-            className="border rounded px-2 py-1"
-          />
-        </div>
       </div>
 
       <div className="mb-6">
