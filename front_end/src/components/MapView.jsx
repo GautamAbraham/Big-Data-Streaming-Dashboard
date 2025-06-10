@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-export default function MapView({ userLocation, setUserLocation }) {
+export default function MapView({ userLocation, setUserLocation , playbackspeed, threshold, startTime, endTime}) {
   const mapRef = useRef();
-
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
@@ -21,6 +21,7 @@ export default function MapView({ userLocation, setUserLocation }) {
 
 
   useEffect(() => {
+    //const socket = new WebSocket(import.meta.env.VITE_API_URL.replace("http", "ws") + "/ws");
     const wsUrl = "ws://localhost:8000/ws"; // hardcoded for testing
     console.log("WebSocket connecting to:", wsUrl); // Debug log
     const ws = new WebSocket(wsUrl);
@@ -32,7 +33,11 @@ export default function MapView({ userLocation, setUserLocation }) {
         const data = JSON.parse(event.data);
         const lat = Number(data.lat);
         const lon = Number(data.lon);
-        if (!isNaN(lat) && !isNaN(lon)) {
+        const value = Number(data.value);
+        const ts    = new Date(msg.timestamp);            // parse incoming timestamp
+        const start = startTime ? new Date(startTime) : null;
+        const end   = endTime   ? new Date(endTime)   : null;
+        if ( !isNaN(lat) && !isNaN(lon) && value > threshold && (!start || ts >= start) && (!end   || ts <= end)) {
           const feature = {
             type: "Feature",
             geometry: {
@@ -56,7 +61,7 @@ export default function MapView({ userLocation, setUserLocation }) {
         }));
         buffer = [];
       }
-    }, 100);
+    }, 100 / playbackSpeed);
 
     return () => {
       ws.close();

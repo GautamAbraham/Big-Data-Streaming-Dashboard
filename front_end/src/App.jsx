@@ -47,6 +47,9 @@ function App() {
           <MapView
             userLocation={userLocation}
             setUserLocation={setUserLocation}
+            playbackSpeed={playbackSpeed}
+            startTime={startTime}
+            endTime={endTime}
           />
           <Legend userLocation={userLocation} />
           <Alerts messages={alertMessages} />
