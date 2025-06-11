@@ -57,7 +57,7 @@ class CleanKafkaJSON(MapFunction):
                 return None
 
             # Validate value ranges
-            if not (-90 <= lat <= 90) or not (-180 <= lon <= 180) or val <= 0:
+            if not (-90 <= lat <= 90) or not (-180 <= lon <= 180) or not val or val <= 0:
                 logging.warning(f"Invalid lat/lon/value in record: {data}")
                 return None
 
