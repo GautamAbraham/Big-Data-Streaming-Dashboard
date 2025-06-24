@@ -1,8 +1,18 @@
 import asyncio
 import configparser
+import os
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from aiokafka import AIOKafkaConsumer
-import os
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+) 
 
 # Load config
 config = configparser.ConfigParser()
@@ -10,7 +20,6 @@ config.read(os.getenv("CONFIG_FILE", "config.ini"))
 KAFKA_TOPIC = config['DEFAULT'].get('KAFKA_TOPIC', 'processed-data-output')
 KAFKA_BOOTSTRAP_SERVERS = config['DEFAULT'].get('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
 
-app = FastAPI()
 clients = set()
 
 @app.websocket("/ws")

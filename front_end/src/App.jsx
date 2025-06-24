@@ -10,7 +10,7 @@ function App() {
   const [userLocation, setUserLocation] = useState(null);
 
   // configuration states
-  const [threshold, setThreshold] = useState(100);
+  const [threshold, setThreshold] = useState(60);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -47,9 +47,9 @@ function App() {
           <MapView
             userLocation={userLocation}
             setUserLocation={setUserLocation}
+            threshold={threshold}
             playbackSpeed={playbackSpeed}
-            startTime={startTime}
-            endTime={endTime}
+            setAlertMessages={setAlertMessages}
           />
           <Legend userLocation={userLocation} />
           <Alerts messages={alertMessages} />
