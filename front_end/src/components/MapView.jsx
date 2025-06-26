@@ -1,71 +1,159 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 export default function MapView({ userLocation, setUserLocation }) {
   const mapRef = useRef();
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [dataStats, setDataStats] = useState({ total: 0, lastUpdate: null });
 
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
   });
 
+  // Enhanced color mapping for radiation levels
   const circleColor = [
-    "match",
-    ["get", "level"],
-    "low", "#22c55e",
-    "moderate", "#eab308",
-    "high", "#ef4444",
-    "#6b7280"
+    "case",
+    [">=", ["get", "value"], 100], "#dc2626", // Very high (red)
+    [">=", ["get", "value"], 50], "#ea580c",  // High (orange-red)
+    [">=", ["get", "value"], 20], "#eab308",  // Moderate (yellow)
+    [">=", ["get", "value"], 10], "#22c55e",  // Low (green)
+    "#6b7280" // Very low/unknown (gray)
   ];
 
+  const circleRadius = [
+    "case",
+    [">=", ["get", "value"], 100], 8,
+    [">=", ["get", "value"], 50], 6,
+    [">=", ["get", "value"], 20], 5,
+    4
+  ];
 
-  useEffect(() => {
-    const wsUrl = "ws://localhost:8000/ws"; // hardcoded for testing
-    console.log("WebSocket connecting to:", wsUrl); // Debug log
+  const connectWebSocket = useCallback(() => {
+    const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+    console.log("WebSocket connecting to:", wsUrl);
+    
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      return; // Already connected
+    }
+
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
     let buffer = [];
-    let intervalId;
+    let bufferTimer;
+
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+      setConnectionStatus('connected');
+      
+      // Start buffering timer
+      bufferTimer = setInterval(() => {
+        if (buffer.length > 0) {
+          const newFeatures = buffer.map(data => ({
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              coordinates: [Number(data.lon), Number(data.lat)],
+            },
+            properties: {
+              ...data,
+              level: getLevelFromValue(data.value),
+              timestamp: new Date().toISOString()
+            },
+          }));
+
+          setGeojson(prev => ({
+            ...prev,
+            features: [...prev.features, ...newFeatures].slice(-2000), // Keep last 2000 points
+          }));
+
+          setDataStats(prev => ({
+            total: prev.total + buffer.length,
+            lastUpdate: new Date().toISOString()
+          }));
+
+          console.log(`Added ${buffer.length} new points. Total features: ${newFeatures.length}`);
+          buffer = [];
+        }
+      }, 150); // Slightly slower for better performance
+    };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        
+        // Handle heartbeat messages
+        if (data.type === 'heartbeat') {
+          console.log("Received heartbeat");
+          return;
+        }
+
+        // Validate required fields
         const lat = Number(data.lat);
         const lon = Number(data.lon);
-        if (!isNaN(lat) && !isNaN(lon)) {
-          const feature = {
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              coordinates: [lon, lat],
-            },
-            properties: data,
-          };
-          buffer.push(feature);
+        const value = Number(data.value);
+
+        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && 
+            lon >= -180 && lon <= 180 && !isNaN(value)) {
+          buffer.push({ ...data, lat, lon, value });
+        } else {
+          console.warn("Invalid data point:", data);
         }
       } catch (e) {
-        // Ignore parse errors
+        console.warn("Failed to parse WebSocket message:", e);
       }
     };
 
-    intervalId = setInterval(() => {
-      if (buffer.length > 0) {
-        setGeojson((prev) => ({
-          ...prev,
-          features: [...prev.features, ...buffer].slice(-1000),
-        }));
-        buffer = [];
-      }
-    }, 100);
+    ws.onclose = () => {
+      console.log("WebSocket disconnected");
+      setConnectionStatus('disconnected');
+      clearInterval(bufferTimer);
+      
+      // Auto-reconnect after 3 seconds
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connectWebSocket();
+      }, 3000);
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      setConnectionStatus('error');
+    };
 
     return () => {
-      ws.close();
-      clearInterval(intervalId);
+      clearInterval(bufferTimer);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
     };
   }, []);
 
+  // Helper function to determine radiation level
+  const getLevelFromValue = (value) => {
+    if (value >= 100) return "very-high";
+    if (value >= 50) return "high";
+    if (value >= 20) return "moderate";
+    if (value >= 10) return "low";
+    return "very-low";
+  };
 
-  // getting the user's current location
+  useEffect(() => {
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [connectWebSocket]);
+
+  // Getting the user's current location
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -81,42 +169,61 @@ export default function MapView({ userLocation, setUserLocation }) {
         { enableHighAccuracy: true }
       );
     }
-  }, []);
+  }, [setUserLocation]);
 
+  // Debug logging (can be removed in production)
+  console.log(`Features count: ${geojson.features.length}, Status: ${connectionStatus}`);
 
   return (
-    <Map
-      ref={mapRef}
-      initialViewState={{ latitude: 20, longitude: 0, zoom: 1.5 }}
-      style={{ width: "100vw", height: "100vh" }}
-      mapStyle="mapbox://styles/mapbox/light-v10"
-      mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
-      interactiveLayerIds={["radiation-points"]}
-    >
-      <Source id="radiation" type="geojson" data={geojson}>
-        <Layer
-          id="radiation-points"
-          type="circle"
-          paint={{
-            "circle-radius": 5,
-            "circle-color": circleColor,
-            "circle-opacity": 0.6,
-          }}
-        />
-      </Source>
+    <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+      {/* Connection Status Indicator */}
+      <div style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        zIndex: 1000,
+        background: connectionStatus === 'connected' ? '#22c55e' : '#ef4444',
+        color: 'white',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '12px'
+      }}>
+        {connectionStatus === 'connected' ? '● Connected' : '● Disconnected'}
+        <div style={{ fontSize: '10px', marginTop: '2px' }}>
+          Points: {geojson.features.length} | Total: {dataStats.total}
+        </div>
+      </div>
 
-      {/* Render user location marker if available */}
-      {userLocation && (
-        <Marker
-          latitude={userLocation.latitude}
-          longitude={userLocation.longitude}
-          offsetLeft={-12}
-          offsetTop={-24}
-        >
-          <div className="h-5 w-5 bg-blue-500 rounded-full border-2 border-white shadow-lg" />
-        </Marker>
-      )}
-      
-    </Map>
+      <Map
+        ref={mapRef}
+        initialViewState={{ latitude: 35.6762, longitude: 139.6503, zoom: 6 }} // Tokyo area for better default view
+        style={{ width: "100vw", height: "100vh" }}
+        mapStyle="mapbox://styles/mapbox/light-v10"
+        mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
+        interactiveLayerIds={["radiation-points"]}
+      >
+        <Source id="radiation" type="geojson" data={geojson}>
+          <Layer
+            id="radiation-points"
+            type="circle"
+            paint={{
+              "circle-radius": circleRadius,
+              "circle-color": circleColor,
+              "circle-opacity": 0.8,
+              "circle-stroke-width": 1,
+              "circle-stroke-color": "#ffffff"
+            }}
+          />
+        </Source>
+
+        {userLocation && (
+          <Marker
+            latitude={userLocation.latitude}
+            longitude={userLocation.longitude}
+            color="blue"
+          />
+        )}
+      </Map>
+    </div>
   );
 }

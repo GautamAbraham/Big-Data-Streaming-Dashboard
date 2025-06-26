@@ -112,6 +112,145 @@ class CleanKafkaJSON(MapFunction):
             logging.error(traceback.format_exc())
             return None
 
+class EnhancedCleanKafkaJSON(MapFunction):
+    """
+    Enhanced version with better metrics and monitoring.
+    Cleans and validates raw JSON records from Kafka.
+    Filters out invalid entries and enriches with danger assessment.
+    Accepts only records with 'unit' as 'cpm' (case-insensitive).
+    """
+
+    def __init__(self, threshold: float):
+        """
+        :param threshold: Radiation value threshold above which 'dangerous' is True
+        """
+        self.threshold = threshold
+        self.processed_count = 0
+        self.valid_count = 0
+        self.invalid_count = 0
+
+    def map(self, value: str) -> str:
+        """
+        Process a raw Kafka message: validate, clean, and enrich it.
+        :param value: Raw JSON string from Kafka
+        :return: Cleaned JSON string or None if invalid
+        """
+        self.processed_count += 1
+        
+        try:
+            # Log every 1000th raw input for monitoring
+            if self.processed_count % 1000 == 0:
+                print(f"STATS - Processed: {self.processed_count}, Valid: {self.valid_count}, Invalid: {self.invalid_count}")
+
+            data = json.loads(value)
+
+            # Extract and validate numerical fields
+            lat = self._safe_float(data.get("lat"))
+            lon = self._safe_float(data.get("lon"))
+            val = self._safe_float(data.get("value"))
+
+            if lat is None or lon is None or val is None:
+                self.invalid_count += 1
+                logging.warning(f"Missing/invalid numerical fields: {data}")
+                return None
+
+            # Geographic bounds validation
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                self.invalid_count += 1
+                logging.warning(f"Out of bounds coordinates: lat={lat}, lon={lon}")
+                return None
+
+            # Value validation (must be non-negative)
+            if val < 0:
+                self.invalid_count += 1
+                logging.warning(f"Negative radiation value: {val}")
+                return None
+
+            # Unit validation: must be 'cpm' (case-insensitive)
+            unit = data.get("unit", "")
+            if not isinstance(unit, str) or unit.strip().lower() != "cpm":
+                self.invalid_count += 1
+                logging.warning(f"Invalid unit (must be 'cpm'): {data}")
+                return None
+
+            # Enhanced level classification with more granular levels
+            if val < 10:
+                level = "very-low"
+                dangerous = False
+            elif 10 <= val < 20:
+                level = "low"
+                dangerous = False
+            elif 20 <= val < 50:
+                level = "moderate" 
+                dangerous = False
+            elif 50 <= val < self.threshold:
+                level = "high"
+                dangerous = True
+            else:
+                level = "very-high"
+                dangerous = True
+            
+            # Parse timestamp if available, otherwise use current time
+            timestamp = self._parse_timestamp(data.get("captured_at"))
+            
+            # Assemble cleaned output with additional metadata
+            cleaned = {
+                "timestamp": timestamp,
+                "lat": round(lat, 6),  # Higher precision for better mapping
+                "lon": round(lon, 6),
+                "value": round(val, 2),
+                "unit": unit.lower(),
+                "level": level,
+                "dangerous": dangerous,
+                "device_id": data.get("device_id", "unknown"),
+                "processed_at": datetime.now(pytz.UTC).isoformat()
+            }
+
+            self.valid_count += 1
+            return json.dumps(cleaned)
+
+        except json.JSONDecodeError as e:
+            self.invalid_count += 1
+            logging.error(f"JSON decode error: {e} | Raw: {value[:100]}...")
+            return None
+        except Exception as e:
+            self.invalid_count += 1
+            logging.error(f"Unexpected error processing record: {e} | Raw: {value[:100]}...")
+            traceback.print_exc()
+            return None
+
+    def _safe_float(self, value) -> float:
+        """Safely convert value to float, handling edge cases."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            if math.isnan(value) or math.isinf(value):
+                return None
+            return float(value)
+        if isinstance(value, str):
+            try:
+                result = float(value.strip())
+                if math.isnan(result) or math.isinf(result):
+                    return None
+                return result
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _parse_timestamp(self, timestamp_str) -> str:
+        """Parse timestamp string into ISO format."""
+        if not timestamp_str:
+            return datetime.now(pytz.UTC).isoformat()
+        
+        try:
+            # Try parsing with dateutil (handles many formats)
+            parsed = dateutil.parser.parse(timestamp_str)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=pytz.UTC)
+            return parsed.isoformat()
+        except Exception:
+            # Fall back to current time if parsing fails
+            return datetime.now(pytz.UTC).isoformat()
 def main():
     """
     Main function to set up the Flink streaming job.
