@@ -4,18 +4,15 @@ from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.typeinfo import Types
 from pyflink.datastream.functions import MapFunction
 from pyflink.common.watermark_strategy import WatermarkStrategy
-from pyflink.common.time import Time
 from pyflink.datastream.functions import ProcessWindowFunction
 from pyflink.datastream.window import TumblingEventTimeWindows
-from pyflink.util.java_utils import get_j_env_configuration
-from pyflink.common import Configuration
+from pyflink.common import Duration
 import json
 import logging
 import configparser
 import os
 import sys
 import traceback
-import math
 from datetime import datetime
 import dateutil.parser
 import pytz
@@ -164,11 +161,15 @@ class DataEnricher(MapFunction):
     Only processes valid data from the first operator.
     """
 
-    def __init__(self, threshold: float):
+    def __init__(self, danger_threshold: float, low_threshold: float, moderate_threshold: float):
         """
-        :param threshold: Radiation value threshold above which 'dangerous' is True
+        :param danger_threshold: Radiation value threshold above which 'dangerous' is True
+        :param low_threshold: Threshold between low and moderate levels
+        :param moderate_threshold: Threshold between moderate and high levels
         """
-        self.threshold = threshold
+        self.danger_threshold = danger_threshold
+        self.low_threshold = low_threshold
+        self.moderate_threshold = moderate_threshold
 
     def map(self, value: str) -> str:
         """
@@ -188,10 +189,10 @@ class DataEnricher(MapFunction):
             data = validation_result["data"]
             val = data["value"]
 
-            # Level classification based on value
-            if val < 20:
+            # Level classification based on configurable thresholds
+            if val < self.low_threshold:
                 level = "low"
-            elif 20 <= val < self.threshold:
+            elif self.low_threshold <= val < self.moderate_threshold:
                 level = "moderate"
             else:
                 level = "high"
@@ -204,7 +205,7 @@ class DataEnricher(MapFunction):
                 "value": val,
                 "unit": data["unit"],
                 "level": level,
-                "dangerous": val > self.threshold,
+                "dangerous": val >= self.danger_threshold,
                 "processed_at": datetime.now(pytz.UTC).isoformat()
             }
             
@@ -292,7 +293,8 @@ class WindowedDataProcessor(ProcessWindowFunction):
                         record_timestamp_ms = int(record_timestamp.timestamp() * 1000)
                         
                         # Check if this is late data (arrived after window end + allowed lateness)
-                        is_late = record_timestamp_ms < (window_end - 120000)  # 2 minutes allowed lateness
+                        # TODO: Make this configurable by passing allowed_lateness_minutes to WindowedDataProcessor
+                        is_late = record_timestamp_ms < (window_end - 120000)  # 2 minutes allowed lateness (should match config)
                         
                         enriched_data["window_start"] = datetime.fromtimestamp(window_start/1000, pytz.UTC).isoformat()
                         enriched_data["window_end"] = datetime.fromtimestamp(window_end/1000, pytz.UTC).isoformat()
@@ -323,13 +325,14 @@ class WindowedDataProcessor(ProcessWindowFunction):
 def main():
     """
     Main function to set up the Flink streaming job with watermark strategy.
+    All configuration parameters are now loaded from config.ini including:
+    - Window size and allowed lateness for event-time processing
+    - All radiation level thresholds (danger, low, moderate)
+    - Watermark strategy parameters (out-of-orderness and interval)
     """
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)  # Set parallelism for the Flink job
     
-    # Configure watermark strategy and late data handling
-    env.get_config().set_auto_watermark_interval(5000)  # 5 second watermark interval
-
     config = load_config()  # Load configuration from config.ini
 
     try:
@@ -338,10 +341,24 @@ def main():
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         kafka_dirty_topic = config['DEFAULT'].get('KAFKA_DIRTY_TOPIC', 'dirty-data')
         kafka_late_topic = config['DEFAULT'].get('KAFKA_LATE_TOPIC', 'late-data')
-        # Define the threshold for dangerous radiation levels.
-        danger_threshold = 100.0
-        # Configure late data tolerance (30 seconds)
-        max_out_of_orderness = 30000  # 30 seconds in milliseconds
+        
+        # Windowing Configuration
+        window_size_minutes = config['DEFAULT'].getint('WINDOW_SIZE_MINUTES', 5)
+        allowed_lateness_minutes = config['DEFAULT'].getint('ALLOWED_LATENESS_MINUTES', 2)
+        
+        # Radiation Level Thresholds
+        danger_threshold = config['DEFAULT'].getfloat('DANGER_THRESHOLD', 100.0)
+        low_threshold = config['DEFAULT'].getint('LOW_THRESHOLD', 20)
+        moderate_threshold = config['DEFAULT'].getint('MODERATE_THRESHOLD', 50)
+        
+        # Watermark Configuration
+        max_out_of_orderness = config['DEFAULT'].getint('MAX_OUT_OF_ORDERNESS_MS', 30000)
+        watermark_interval = config['DEFAULT'].getint('WATERMARK_INTERVAL_MS', 5000)
+        
+        # Configure watermark strategy and late data handling
+        env.get_config().set_auto_watermark_interval(watermark_interval)
+        
+        logging.info(f"Configuration loaded - Window: {window_size_minutes}min, Lateness: {allowed_lateness_minutes}min, Danger: {danger_threshold}CPM, Low: {low_threshold}CPM, Moderate: {moderate_threshold}CPM")
     except KeyError as e:
         logging.error(f"Missing configuration key: {e}. Please check your config file.")
         sys.exit(1)
@@ -366,24 +383,24 @@ def main():
     valid_stream = validated_stream.filter(lambda x: json.loads(x).get("is_valid", False))
     invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False))
 
-    # Apply watermark strategy
+    # Apply watermark strategy using Duration API (fixes PyFlink compatibility)
     watermark_strategy = WatermarkStrategy \
-        .for_bounded_out_of_orderness(Time.milliseconds(max_out_of_orderness)) \
+        .for_bounded_out_of_orderness(Duration.of_millis(max_out_of_orderness)) \
         .with_timestamp_assigner(TimestampExtractor.extract_timestamp)
     
     watermarked_valid_stream = valid_stream.assign_timestamps_and_watermarks(watermark_strategy)
 
-    # Apply windowing with allowed lateness for late data handling 5 min window, 2 min allowed lateness
+    # Apply windowing with allowed lateness for late data handling using Duration API
     windowed_stream_with_late_data = watermarked_valid_stream \
-        .window_all(TumblingEventTimeWindows.of(Time.minutes(5))) \
-        .allowed_lateness(Time.minutes(2)) \
+        .window_all(TumblingEventTimeWindows.of(Duration.of_minutes(window_size_minutes))) \
+        .allowed_lateness(Duration.of_minutes(allowed_lateness_minutes)) \
         .process(WindowedDataProcessor(), output_type=Types.STRING())
 
     # Extract late data side output
     late_data_stream = windowed_stream_with_late_data.get_side_output("late-data")
 
     # Second operator: Data enrichment (only for valid windowed data)
-    enriched_stream = windowed_stream_with_late_data.map(DataEnricher(danger_threshold), output_type=Types.STRING()) \
+    enriched_stream = windowed_stream_with_late_data.map(DataEnricher(danger_threshold, low_threshold, moderate_threshold), output_type=Types.STRING()) \
                                                     .filter(lambda x: x is not None)
 
     # --- Output enriched data to processed data topic ---
