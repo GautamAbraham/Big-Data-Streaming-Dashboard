@@ -3,6 +3,12 @@ from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer, FlinkKafkaPr
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.typeinfo import Types
 from pyflink.datastream.functions import MapFunction
+from pyflink.common.watermark_strategy import WatermarkStrategy
+from pyflink.common.time import Time
+from pyflink.datastream.functions import ProcessWindowFunction
+from pyflink.datastream.window import TumblingEventTimeWindows
+from pyflink.util.java_utils import get_j_env_configuration
+from pyflink.common import Configuration
 import json
 import logging
 import configparser
@@ -167,6 +173,7 @@ class DataEnricher(MapFunction):
     def map(self, value: str) -> str:
         """
         Enrich validated data with level classification and danger assessment.
+        Now handles windowed data with additional metadata.
         :param value: JSON string from DataValidator containing validated data
         :return: Enriched JSON string or None if input was invalid
         """
@@ -200,6 +207,17 @@ class DataEnricher(MapFunction):
                 "dangerous": val > self.threshold,
                 "processed_at": datetime.now(pytz.UTC).isoformat()
             }
+            
+            # Add windowing metadata if available
+            if "window_start" in data:
+                enriched["window_start"] = data["window_start"]
+                enriched["window_end"] = data["window_end"]
+                enriched["watermark_timestamp"] = data["watermark_timestamp"]
+                enriched["records_in_window"] = data["records_in_window"]
+                enriched["is_late_data"] = data.get("is_late_data", False)
+                enriched["event_time_processing"] = True
+            else:
+                enriched["event_time_processing"] = False
 
             return json.dumps(enriched)
 
@@ -211,12 +229,106 @@ class DataEnricher(MapFunction):
             logging.error(traceback.format_exc())
             return None
 
+class TimestampExtractor:
+    """
+    Extract timestamp from valid records for watermark generation
+    """
+    @staticmethod
+    def extract_timestamp(record_json: str, current_timestamp: int) -> int:
+        """
+        Extract timestamp from valid JSON record and convert to milliseconds
+        :param record_json: JSON string with validated data (guaranteed to be valid)
+        :param current_timestamp: Current processing time timestamp
+        :return: Timestamp in milliseconds since epoch
+        """
+        try:
+            data = json.loads(record_json)
+            
+            # For valid data, we know the structure is {"is_valid": true, "data": {...}}
+            if "is_valid" in data and data["is_valid"]:
+                timestamp_str = data["data"]["timestamp"]
+                
+                # Parse ISO timestamp and convert to milliseconds
+                dt = dateutil.parser.isoparse(timestamp_str)
+                return int(dt.timestamp() * 1000)
+            else:
+                # This shouldn't happen since we only apply watermarks to valid data
+                logging.warning(f"TimestampExtractor received invalid data: {record_json}")
+                return current_timestamp
+            
+        except Exception as e:
+            logging.warning(f"Failed to extract timestamp from {record_json}: {e}")
+            # Return current time as fallback
+            return current_timestamp
+
+class WindowedDataProcessor(ProcessWindowFunction):
+    """
+    Process windowed valid data and add window metadata.
+    Only processes valid records that have passed validation.
+    Handles late data detection and routing.
+    """
+    
+    def process(self, key, context, elements, out):
+        """
+        Process windowed valid elements and add window metadata
+        """
+        try:
+            window_start = context.window().start
+            window_end = context.window().end
+            current_watermark = context.current_watermark()
+            
+            records_in_window = list(elements)
+            
+            for record in records_in_window:
+                try:
+                    data = json.loads(record)
+                    
+                    # All records here should be valid since we filter before windowing
+                    if "is_valid" in data and data["is_valid"]:
+                        enriched_data = data["data"].copy()
+                        
+                        # Extract record timestamp for late data detection
+                        record_timestamp = dateutil.parser.isoparse(enriched_data["timestamp"])
+                        record_timestamp_ms = int(record_timestamp.timestamp() * 1000)
+                        
+                        # Check if this is late data (arrived after window end + allowed lateness)
+                        is_late = record_timestamp_ms < (window_end - 120000)  # 2 minutes allowed lateness
+                        
+                        enriched_data["window_start"] = datetime.fromtimestamp(window_start/1000, pytz.UTC).isoformat()
+                        enriched_data["window_end"] = datetime.fromtimestamp(window_end/1000, pytz.UTC).isoformat()
+                        enriched_data["watermark_timestamp"] = datetime.fromtimestamp(current_watermark/1000, pytz.UTC).isoformat()
+                        enriched_data["records_in_window"] = len(records_in_window)
+                        enriched_data["is_late_data"] = is_late
+                        enriched_data["record_timestamp_ms"] = record_timestamp_ms
+                        
+                        if is_late:
+                            # Send late data to side output
+                            enriched_data["late_arrival_reason"] = f"Record timestamp {record_timestamp_ms} is before window end {window_end} - allowed lateness"
+                            context.output("late-data", json.dumps({"is_valid": True, "data": enriched_data, "late_data": True}))
+                        else:
+                            # Send normal data to main output
+                            out.collect(json.dumps({"is_valid": True, "data": enriched_data}))
+                    else:
+                        # This shouldn't happen, but log it for debugging
+                        logging.warning(f"WindowedDataProcessor received invalid data: {record}")
+                        
+                except Exception as e:
+                    logging.error(f"Error processing windowed record: {e}")
+                    # Skip malformed records in window
+                    
+        except Exception as e:
+            logging.error(f"Error in WindowedDataProcessor: {e}")
+            # Skip all records on severe error
+
 def main():
     """
-    Main function to set up the Flink streaming job.
+    Main function to set up the Flink streaming job with watermark strategy.
     """
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)  # Set parallelism for the Flink job
+    
+    # Configure watermark strategy and late data handling
+    env.get_config().set_auto_watermark_interval(5000)  # 5 second watermark interval
 
     config = load_config()  # Load configuration from config.ini
 
@@ -225,8 +337,11 @@ def main():
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         kafka_dirty_topic = config['DEFAULT'].get('KAFKA_DIRTY_TOPIC', 'dirty-data')
+        kafka_late_topic = config['DEFAULT'].get('KAFKA_LATE_TOPIC', 'late-data')
         # Define the threshold for dangerous radiation levels.
         danger_threshold = 100.0
+        # Configure late data tolerance (30 seconds)
+        max_out_of_orderness = 30000  # 30 seconds in milliseconds
     except KeyError as e:
         logging.error(f"Missing configuration key: {e}. Please check your config file.")
         sys.exit(1)
@@ -251,9 +366,25 @@ def main():
     valid_stream = validated_stream.filter(lambda x: json.loads(x).get("is_valid", False))
     invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False))
 
-    # Second operator: Data enrichment (only for valid data)
-    enriched_stream = valid_stream.map(DataEnricher(danger_threshold), output_type=Types.STRING()) \
-                                  .filter(lambda x: x is not None)
+    # Apply watermark strategy
+    watermark_strategy = WatermarkStrategy \
+        .for_bounded_out_of_orderness(Time.milliseconds(max_out_of_orderness)) \
+        .with_timestamp_assigner(TimestampExtractor.extract_timestamp)
+    
+    watermarked_valid_stream = valid_stream.assign_timestamps_and_watermarks(watermark_strategy)
+
+    # Apply windowing with allowed lateness for late data handling 5 min window, 2 min allowed lateness
+    windowed_stream_with_late_data = watermarked_valid_stream \
+        .window_all(TumblingEventTimeWindows.of(Time.minutes(5))) \
+        .allowed_lateness(Time.minutes(2)) \
+        .process(WindowedDataProcessor(), output_type=Types.STRING())
+
+    # Extract late data side output
+    late_data_stream = windowed_stream_with_late_data.get_side_output("late-data")
+
+    # Second operator: Data enrichment (only for valid windowed data)
+    enriched_stream = windowed_stream_with_late_data.map(DataEnricher(danger_threshold), output_type=Types.STRING()) \
+                                                    .filter(lambda x: x is not None)
 
     # --- Output enriched data to processed data topic ---
     processed_producer = FlinkKafkaProducer(
@@ -275,11 +406,20 @@ def main():
     )
     invalid_stream.add_sink(dirty_producer)
 
-    # --- Output for testing ---
-    # cleaned_stream.print()
-    # cleaned_stream.map(lambda x: f"Processed: {x}").print()
+    # --- Output late data to late data topic ---
+    late_producer = FlinkKafkaProducer(
+        topic=kafka_late_topic,
+        serialization_schema=SimpleStringSchema(),
+        producer_config={
+            'bootstrap.servers': kafka_bootstrap_servers
+        }
+    )
+    late_data_stream.add_sink(late_producer)
 
-    env.execute("Radiation Monitoring Flink Job")
+    # --- Output for testing ---
+    # enriched_stream.print()
+
+    env.execute("Radiation Monitoring Flink Job with Watermarks and Late Data Handling")
 
 if __name__ == "__main__":
     main()
