@@ -1,18 +1,28 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-export default function MapView({ userLocation, setUserLocation }) {
+export default function MapView({
+  userLocation,
+  setUserLocation,
+  threshold,
+  playbackSpeed,
+  setAlertMessages,
+}) {
   const mapRef = useRef();
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [dataStats, setDataStats] = useState({ total: 0, lastUpdate: null });
-
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
   });
+
+  const thresholdRef = useRef(threshold);
+  useEffect(() => {
+    thresholdRef.current = threshold;
+  }, [threshold]);
 
   // Enhanced color mapping for radiation levels
   const circleColor = [
@@ -49,7 +59,8 @@ export default function MapView({ userLocation, setUserLocation }) {
       console.log("WebSocket connected");
       setConnectionStatus('connected');
       
-      // Start buffering timer
+      // Start buffering timer with playback speed
+      const updateInterval = Math.max(50, 1000 / Math.max(playbackSpeed, 0.1));
       bufferTimer = setInterval(() => {
         if (buffer.length > 0) {
           const newFeatures = buffer.map(data => ({
@@ -78,7 +89,7 @@ export default function MapView({ userLocation, setUserLocation }) {
           console.log(`Added ${buffer.length} new points. Total features: ${newFeatures.length}`);
           buffer = [];
         }
-      }, 150); // Slightly slower for better performance
+      }, updateInterval);
     };
 
     ws.onmessage = (event) => {
@@ -98,6 +109,12 @@ export default function MapView({ userLocation, setUserLocation }) {
 
         if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && 
             lon >= -180 && lon <= 180 && !isNaN(value)) {
+              if (value >= thresholdRef.current) {
+                setAlertMessages((prev) => [
+                  ...prev,
+                  `High radiation detected: ${value} at (${lat}, ${lon})`
+                ]);
+              }
           buffer.push({ ...data, lat, lon, value });
         } else {
           console.warn("Invalid data point:", data);
@@ -129,7 +146,7 @@ export default function MapView({ userLocation, setUserLocation }) {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, []);
+  }, [playbackSpeed, setAlertMessages]);
 
   // Helper function to determine radiation level
   const getLevelFromValue = (value) => {
