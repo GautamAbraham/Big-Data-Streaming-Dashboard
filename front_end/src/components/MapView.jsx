@@ -15,6 +15,11 @@ export default function MapView({
     features: [],
   });
 
+  const thresholdRef = useRef(threshold);
+  useEffect(() => {
+    thresholdRef.current = threshold;
+  }, [threshold]);
+
   const circleColor = [
     "match",
     ["get", "level"],
@@ -42,21 +47,20 @@ export default function MapView({
         ws.close();
       };
       ws.onmessage = (event) => {
+        //console.log("Current threshold:", threshold, "Current value:", value);
         try {
           const data = JSON.parse(event.data);
           const lat = Number(data.lat);
           const lon = Number(data.lon);
           const value = Number(data.value);
-
-          if (!isNaN(lat) && !isNaN(lon) && value > threshold) {
-            // CPM alert for ≥ 100
-            if (value >= 100) {
+          
+          if (!isNaN(lat) && !isNaN(lon) && value >= thresholdRef.current) {
+           
               setAlertMessages((prev) => [
                 ...prev,
                 `CRITICAL: CPM reached ${value} at [${lat.toFixed(2)}, ${lon.toFixed(2)}]!`,
               ]);
-            }
-            // Add to buffer
+           
             const feature = {
               type: "Feature",
               geometry: {
@@ -84,8 +88,7 @@ export default function MapView({
         }));
         buffer = [];
       }
-    }, Math.max(100, 1000 / Math.max(playbackSpeed, 0.1))); // Higher playbackSpeed = faster
-
+    }, Math.max(100, 1000 / Math.max(playbackSpeed, 0.1))); 
     return () => {
       ws && ws.close();
       clearInterval(intervalId);
