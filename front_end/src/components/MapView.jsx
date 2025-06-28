@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
@@ -10,9 +10,18 @@ export default function MapView({
   setAlertMessages,
 }) {
   const mapRef = useRef();
+  const wsRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [dataStats, setDataStats] = useState({ total: 0, lastUpdate: null });
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
+  });
+  const [viewState, setViewState] = useState({
+    latitude: 0,
+    longitude: 0,
+    zoom: 2
   });
 
   const thresholdRef = useRef(threshold);
@@ -20,82 +29,164 @@ export default function MapView({
     thresholdRef.current = threshold;
   }, [threshold]);
 
+  // Enhanced color mapping for radiation levels
   const circleColor = [
-    "match",
-    ["get", "level"],
-    "low", "#22c55e",
-    "moderate", "#eab308",
-    "high", "#ef4444",
-    "#6b7280"
+    "case",
+    [">=", ["get", "value"], 100], "#dc2626", // Very high (red)
+    [">=", ["get", "value"], 50], "#ea580c",  // High (orange-red)
+    [">=", ["get", "value"], 20], "#eab308",  // Moderate (yellow)
+    [">=", ["get", "value"], 10], "#22c55e",  // Low (green)
+    "#6b7280" // Very low/unknown (gray)
   ];
 
-  useEffect(() => {
-    const wsUrl = "ws://localhost:8000/ws";
-    let ws;
-    let buffer = [];
+  const circleRadius = [
+    "case",
+    [">=", ["get", "value"], 100], 8,
+    [">=", ["get", "value"], 50], 6,
+    [">=", ["get", "value"], 20], 5,
+    4
+  ];
 
-    function connect() {
-      ws = new window.WebSocket(wsUrl);
-
-      ws.onopen = () => console.log("WebSocket connected");
-      ws.onclose = () => {
-        console.log("WebSocket closed. Reconnecting in 2s...");
-        setTimeout(connect, 2000);
-      };
-      ws.onerror = (e) => {
-        console.error("WebSocket error:", e);
-        ws.close();
-      };
-      ws.onmessage = (event) => {
-        //console.log("Current threshold:", threshold, "Current value:", value);
-        try {
-          const data = JSON.parse(event.data);
-          const lat = Number(data.lat);
-          const lon = Number(data.lon);
-          const value = Number(data.value);
-          
-          if (!isNaN(lat) && !isNaN(lon) && value >= thresholdRef.current) {
-           
-              setAlertMessages((prev) => [
-                ...prev,
-                `CRITICAL: CPM reached ${value} at [${lat.toFixed(2)}, ${lon.toFixed(2)}]!`,
-              ]);
-           
-            const feature = {
-              type: "Feature",
-              geometry: {
-                type: "Point",
-                coordinates: [lon, lat],
-              },
-              properties: data,
-            };
-            buffer.push(feature);
-          }
-        } catch (e) {
-          console.warn("parse error", e);
-        }
-      };
+  const connectWebSocket = useCallback(() => {
+    const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+    console.log("WebSocket connecting to:", wsUrl);
+    
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      return; // Already connected
     }
 
-    connect();
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    let buffer = [];
+    let bufferTimer;
 
-    // Update geojson every interval, using playbackSpeed
-    const intervalId = setInterval(() => {
-      if (buffer.length > 0) {
-        setGeojson((prev) => ({
-          ...prev,
-          features: [...prev.features, ...buffer].slice(-1000),
-        }));
-        buffer = [];
-      }
-    }, Math.max(100, 1000 / Math.max(playbackSpeed, 0.1))); 
-    return () => {
-      ws && ws.close();
-      clearInterval(intervalId);
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+      setConnectionStatus('connected');
+      
+      // Start buffering timer with playback speed
+      const updateInterval = Math.max(50, 1000 / Math.max(playbackSpeed, 0.1));
+      bufferTimer = setInterval(() => {
+        if (buffer.length > 0) {
+          const newFeatures = buffer.map(data => ({
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              coordinates: [Number(data.lon), Number(data.lat)],
+            },
+            properties: {
+              ...data,
+              level: getLevelFromValue(data.value),
+              timestamp: new Date().toISOString()
+            },
+          }));
+
+          setGeojson(prev => ({
+            ...prev,
+            features: [...prev.features, ...newFeatures].slice(-2000), // Keep last 2000 points
+          }));
+
+          setDataStats(prev => ({
+            total: prev.total + buffer.length,
+            lastUpdate: new Date().toISOString()
+          }));
+
+          console.log(`Added ${buffer.length} new points. Total features: ${newFeatures.length}`);
+          buffer = [];
+        }
+      }, updateInterval);
     };
-  }, [threshold, playbackSpeed, setAlertMessages]);
 
-  // Get user geolocation
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Handle heartbeat messages
+        if (data.type === 'heartbeat') {
+          console.log("Received heartbeat");
+          return;
+        }
+
+        // Validate required fields
+        const lat = Number(data.lat);
+        const lon = Number(data.lon);
+        const value = Number(data.value);
+
+        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && 
+            lon >= -180 && lon <= 180 && !isNaN(value)) {
+              if (value >= thresholdRef.current) {
+                setAlertMessages((prev) => [
+                  ...prev,
+                  `High radiation detected: ${value} at (${lat}, ${lon})`
+                ]);
+              }
+          buffer.push({ ...data, lat, lon, value });
+        } else {
+          console.warn("Invalid data point:", data);
+        }
+      } catch (e) {
+        console.warn("Failed to parse WebSocket message:", e);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket disconnected");
+      setConnectionStatus('disconnected');
+      clearInterval(bufferTimer);
+      
+      // Auto-reconnect after 3 seconds
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connectWebSocket();
+      }, 3000);
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+      setConnectionStatus('error');
+    };
+
+    return () => {
+      clearInterval(bufferTimer);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [playbackSpeed, setAlertMessages]);
+
+  // Helper function to determine radiation level
+  const getLevelFromValue = (value) => {
+    if (value >= 100) return "very-high";
+    if (value >= 50) return "high";
+    if (value >= 20) return "moderate";
+    if (value >= 10) return "low";
+    return "very-low";
+  };
+
+  useEffect(() => {
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, [connectWebSocket]);
+
+  // Update view state when user location changes
+  useEffect(() => {
+    if (userLocation) {
+      setViewState({
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        zoom: 8
+      });
+    }
+  }, [userLocation]);
+
+  // Getting the user's current location
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -113,37 +204,60 @@ export default function MapView({
     }
   }, [setUserLocation]);
 
+  // Debug logging (can be removed in production)
+  console.log(`Features count: ${geojson.features.length}, Status: ${connectionStatus}`);
+
   return (
-    <Map
-      ref={mapRef}
-      initialViewState={{ latitude: 20, longitude: 0, zoom: 1.5 }}
-      style={{ width: "100vw", height: "100vh" }}
-      mapStyle="mapbox://styles/mapbox/light-v10"
-      mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
-      interactiveLayerIds={["radiation-points"]}
-    >
-      <Source id="radiation" type="geojson" data={geojson}>
-        <Layer
-          id="radiation-points"
-          type="circle"
-          paint={{
-            "circle-radius": 5,
-            "circle-color": circleColor,
-            "circle-opacity": 0.6,
-          }}
-        />
-      </Source>
-      {/* User location marker */}
-      {userLocation && (
-        <Marker
-          latitude={userLocation.latitude}
-          longitude={userLocation.longitude}
-          offsetLeft={-12}
-          offsetTop={-24}
-        >
-          <div className="h-5 w-5 bg-blue-500 rounded-full border-2 border-white shadow-lg" />
-        </Marker>
-      )}
-    </Map>
+    <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+      {/* Connection Status Indicator */}
+      <div style={{
+        position: 'absolute',
+        top: 10,
+        right: 10,
+        zIndex: 1000,
+        background: connectionStatus === 'connected' ? '#22c55e' : '#ef4444',
+        color: 'white',
+        padding: '8px 12px',
+        borderRadius: '4px',
+        fontSize: '12px'
+      }}>
+        {connectionStatus === 'connected' ? '● Connected' : '● Disconnected'}
+        <div style={{ fontSize: '10px', marginTop: '2px' }}>
+          Points: {geojson.features.length} | Total: {dataStats.total}
+        </div>
+      </div>
+
+      <Map
+        ref={mapRef}
+        {...viewState}
+        onMove={evt => setViewState(evt.viewState)}
+        style={{ width: "100vw", height: "100vh" }}
+        mapStyle="mapbox://styles/mapbox/light-v10"
+        mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
+        interactiveLayerIds={["radiation-points"]}
+      >
+        <Source id="radiation" type="geojson" data={geojson}>
+          <Layer
+            id="radiation-points"
+            type="circle"
+            paint={{
+              "circle-radius": circleRadius,
+              "circle-color": circleColor,
+              "circle-opacity": 0.8,
+              "circle-stroke-width": 1,
+              "circle-stroke-color": "#ffffff"
+            }}
+          />
+        </Source>
+
+        {userLocation && (
+          <Marker
+            latitude={userLocation.latitude}
+            longitude={userLocation.longitude}
+            color="blue"
+          />
+        )}
+      </Map>
+    </div>
   );
 }

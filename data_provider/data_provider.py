@@ -55,7 +55,7 @@ def send_data_from_csv(producer: KafkaProducer, topic: str, csv_file_path: str, 
             producer.send(topic, value=data)
             logging.info(f"Sent data to kafka: {data}")
 
-            time.sleep(0.01)
+            time.sleep(0.00001)
 
     producer.flush()
     logging.info("Finished sending all data.")

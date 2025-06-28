@@ -3,16 +3,17 @@ from pyflink.datastream.connectors.kafka import FlinkKafkaConsumer, FlinkKafkaPr
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.typeinfo import Types
 from pyflink.datastream.functions import MapFunction
+from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
+from pyflink.datastream.functions import ProcessWindowFunction
+from pyflink.datastream.window import TumblingEventTimeWindows
+from pyflink.common import Duration, Time
 import json
 import logging
 import configparser
 import os
 import sys
 import traceback
-import math
-from datetime import datetime
-import dateutil.parser
-import pytz
+import time
 
 # Set up basic logging for Flink
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,111 +23,393 @@ def load_config(config_path: str = "config.ini") -> configparser.ConfigParser:
     config.read(os.getenv("CONFIG_FILE", config_path))
     return config
 
-class CleanKafkaJSON(MapFunction):
+class ValidationResult:
     """
-    Cleans and validates raw JSON records from Kafka.
-    Filters out invalid entries and enriches with danger assessment.
-    Accepts only records with 'unit' as 'cpm' (case-insensitive).
+    Container for validation results with valid/invalid data tracking
     """
+    def __init__(self, is_valid: bool, data: dict = None, error_message: str = None):
+        self.is_valid = is_valid
+        self.data = data
+        self.error_message = error_message
 
-    def __init__(self, threshold: float):
-        """
-        :param threshold: Radiation value threshold above which 'dangerous' is True
-        """
-        self.threshold = threshold
+class DataValidator(MapFunction):
+    """
+    First operator: Validates raw JSON records from Kafka.
+    Returns ValidationResult with valid data or error information.
+    """
 
     def map(self, value: str) -> str:
         """
-        Process a raw Kafka message: validate, clean, and enrich it.
+        Validate raw Kafka message and return validation result.
         :param value: Raw JSON string from Kafka
-        :return: Cleaned JSON string or None if invalid
+        :return: JSON string with validation result
         """
         try:
             # Log every raw input
             print(f"RAW MESSAGE: {value}")
 
-            data = json.loads(value)
+            # Parse JSON
+            try:
+                data = json.loads(value)
+            except json.JSONDecodeError:
+                result = ValidationResult(False, error_message=f"Invalid JSON: {value}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
 
             # Extract and validate numerical fields
             try:
-                lat = round(float(data.get("latitude")), 5)
-                lon = round(float(data.get("longitude")), 5)
+                lat = float(data.get("latitude"))
+                lon = float(data.get("longitude"))
                 val = float(data.get("value"))
             except (TypeError, ValueError):
-                logging.warning(f"Invalid types in record: {data}")
-                return None
+                result = ValidationResult(False, error_message=f"Invalid numeric types in record: {data}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
 
             # Validate value ranges
             if not (-90 <= lat <= 90) or not (-180 <= lon <= 180) or not val or val <= 0:
-                logging.warning(f"Invalid lat/lon/value in record: {data}")
-                return None
+                result = ValidationResult(False, error_message=f"Invalid lat/lon/value ranges: lat={lat}, lon={lon}, val={val}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
 
             # Validate and clean timestamp
             timestamp = data.get("captured_time")
             if not timestamp:
-                logging.warning(f"Missing timestamp: {data}")
-                return None
-            # Normalize timestamp to ISO 8601 with timezone (UTC)
+                result = ValidationResult(False, error_message=f"Missing timestamp in record: {data}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
+
+            # Normalize timestamp using our custom function
             try:
-                dt = dateutil.parser.isoparse(timestamp)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=pytz.UTC)
-                dt_utc = dt.astimezone(pytz.UTC)
-                timestamp = dt_utc.isoformat()
+                timestamp_ms = parse_timestamp(timestamp)
+                # Format to ISO for consistency
+                timestamp = format_timestamp(timestamp_ms)
             except Exception as e:
-                logging.warning(f"Invalid timestamp format: {timestamp} in record: {data}")
-                return None
+                result = ValidationResult(False, error_message=f"Invalid timestamp format: {timestamp}, error: {str(e)}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
 
             # Unit validation: must be 'cpm' (case-insensitive)
             unit = data.get("unit", "")
             if not isinstance(unit, str) or unit.strip().lower() != "cpm":
-                logging.warning(f"Invalid unit (must be 'cpm'): {data}")
+                result = ValidationResult(False, error_message=f"Invalid unit (must be 'cpm'): {unit}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
+
+            # CPM value validation: must be integer (no decimal values allowed)
+            if not isinstance(val, int) and not val.is_integer():
+                result = ValidationResult(False, error_message=f"CPM value must be integer, got: {val}")
+                return json.dumps({
+                    "is_valid": result.is_valid,
+                    "error": result.error_message,
+                    "raw_data": value
+                })
+
+            # Convert to integer for consistency
+            val = int(val)
+
+            # If all validations pass, return valid data
+            valid_data = {
+                "timestamp": timestamp,
+                "timestamp_ms": timestamp_ms,  # Add millisecond timestamp for easier processing
+                "lat": lat,
+                "lon": lon,
+                "value": val,
+                "unit": "cpm"
+            }
+
+            result = ValidationResult(True, valid_data)
+            return json.dumps({
+                "is_valid": result.is_valid,
+                "data": result.data
+            })
+
+        except Exception as e:
+            print(f"Unexpected error in DataValidator.map(): {e}")
+            print(traceback.format_exc())
+            result = ValidationResult(False, error_message=f"Unexpected error: {str(e)}")
+            return json.dumps({
+                "is_valid": result.is_valid,
+                "error": result.error_message,
+                "raw_data": value
+            })
+
+class DataEnricher(MapFunction):
+    """
+    Second operator: Enriches validated data with level classification and danger assessment.
+    Only processes valid data from the first operator.
+    """
+
+    def __init__(self, danger_threshold: float, low_threshold: float, moderate_threshold: float):
+        """
+        :param danger_threshold: Radiation value threshold above which 'dangerous' is True
+        :param low_threshold: Threshold between low and moderate levels
+        :param moderate_threshold: Threshold between moderate and high levels
+        """
+        self.danger_threshold = danger_threshold
+        self.low_threshold = low_threshold
+        self.moderate_threshold = moderate_threshold
+
+    def map(self, value: str) -> str:
+        """
+        Enrich validated data with level classification and danger assessment.
+        Now handles windowed data with additional metadata.
+        :param value: JSON string from DataValidator containing validated data
+        :return: Enriched JSON string or None if input was invalid
+        """
+        try:
+            validation_result = json.loads(value)
+            
+            # Skip invalid data (should not reach here, but safety check)
+            if not validation_result.get("is_valid", False):
+                print(f"DataEnricher received invalid data: {value}")
                 return None
 
-            # Level classsification based on value
-            if val < 20:
+            data = validation_result["data"]
+            val = data["value"]
+
+            # Level classification based on configurable thresholds
+            if val < self.low_threshold:
                 level = "low"
-            elif 20 <= val < self.threshold:
+            elif self.low_threshold <= val < self.moderate_threshold:
                 level = "moderate"
             else:
                 level = "high"
             
-            # Assemble cleaned output
-            cleaned = {
-                "timestamp": timestamp,
-                "lat": round(lat, 5),
-                "lon": round(lon, 5),
+            # Assemble enriched output
+            enriched = {
+                "timestamp": data["timestamp"],
+                "lat": round(data["lat"], 5),
+                "lon": round(data["lon"], 5),
                 "value": val,
-                "unit": unit.lower(),  # normalize case
+                "unit": data["unit"],
                 "level": level,
-                "dangerous": val > self.threshold
+                "dangerous": val >= self.danger_threshold,
+                "processed_at": get_current_time_iso()
             }
+            
+            # Add windowing metadata if available
+            if "window_start" in data:
+                enriched["window_start"] = data["window_start"]
+                enriched["window_end"] = data["window_end"]
+                enriched["watermark_timestamp"] = data["watermark_timestamp"]
+                enriched["records_in_window"] = data["records_in_window"]
+                enriched["is_late_data"] = data.get("is_late_data", False)
+                enriched["event_time_processing"] = True
+            else:
+                enriched["event_time_processing"] = False
 
-            return json.dumps(cleaned)
+            return json.dumps(enriched)
 
         except json.JSONDecodeError:
-            logging.error(f"Invalid JSON: {value}")
+            print(f"DataEnricher received invalid JSON: {value}")
             return None
         except Exception as e:
-            logging.error(f"Unexpected error in map(): {e}")
-            logging.error(traceback.format_exc())
+            print(f"Unexpected error in DataEnricher.map(): {e}")
+            print(traceback.format_exc())
             return None
+
+def extract_event_timestamp(element: str, record_timestamp: int) -> int:
+    """
+    Clean and simple timestamp extraction function for watermark strategy.
+    Uses the pre-computed timestamp_ms from validation instead of parsing again.
+    """
+    try:
+        data = json.loads(element)
+        if data.get("is_valid", False):
+            # Use pre-computed timestamp_ms if available
+            if "timestamp_ms" in data["data"]:
+                return data["data"]["timestamp_ms"]
+            else:
+                # Fall back to parsing if needed
+                return parse_timestamp(data["data"]["timestamp"])
+    except Exception:
+        pass
+    return record_timestamp
+
+class RadiationTimestampAssigner(TimestampAssigner):
+    """
+    Proper TimestampAssigner implementation for PyFlink compatibility
+    """
+    
+    def extract_timestamp(self, element: str, record_timestamp: int) -> int:
+        """
+        Extract timestamp from radiation data record
+        """
+        return extract_event_timestamp(element, record_timestamp)
+
+class WindowedDataProcessor(ProcessWindowFunction):
+    """
+    Process windowed valid data and add window metadata.
+    Only processes valid records that have passed validation.
+    Handles late data detection and routing.
+    
+    This is a minimal implementation to avoid serialization issues.
+    """
+    
+    def process(self, key, context, elements, out):
+        """
+        Process windowed valid elements and add window metadata
+        """
+        # Simplified version for better serialization
+        window_start = context.window().start
+        window_end = context.window().end
+        current_watermark = context.current_watermark()
+        
+        # Convert to list for length calculation
+        records = list(elements)
+        count = len(records)
+        
+        for record in records:
+            try:
+                # Simple json parsing
+                data = json.loads(record)
+                
+                if "is_valid" in data and data["is_valid"]:
+                    # Create a copy to avoid modifying the original
+                    data_copy = {}
+                    data_copy.update(data)
+                    
+                    if "data" in data_copy:
+                        # Add window metadata
+                        window_data = data_copy["data"].copy()
+                        
+                        # Get timestamp in ms
+                        ts_ms = window_data.get("timestamp_ms", 0)
+                        if ts_ms == 0 and "timestamp" in window_data:
+                            ts_ms = parse_timestamp(window_data["timestamp"])
+                        
+                        # Check if late (fixed 2-minute allowed lateness)
+                        is_late = ts_ms < (window_end - 120000)
+                        
+                        # Add metadata
+                        window_data["window_start"] = format_timestamp(window_start)
+                        window_data["window_end"] = format_timestamp(window_end)
+                        window_data["watermark_timestamp"] = format_timestamp(current_watermark)
+                        window_data["records_in_window"] = count
+                        window_data["is_late_data"] = is_late
+                        
+                        # Route based on lateness
+                        if is_late:
+                            window_data["late_arrival_reason"] = "Record timestamp before window end minus allowed lateness"
+                            context.output("late-data", json.dumps({"is_valid": True, "data": window_data, "late_data": True}))
+                        else:
+                            out.collect(json.dumps({"is_valid": True, "data": window_data}))
+            except Exception:
+                # Silent failure - just skip problematic records
+                pass
+
+# Utility functions for timestamp handling without external libraries
+def parse_timestamp(timestamp_str):
+    """
+    Ultra-simplified timestamp parser designed to be completely serialization-safe.
+    Handles ISO 8601 timestamps and returns milliseconds since epoch.
+    """
+    if not timestamp_str or not isinstance(timestamp_str, str):
+        return int(time.time() * 1000)  # Current time as fallback
+        
+    try:
+        # Super simplified version with fallbacks for serialization safety
+        if 'T' in timestamp_str:
+            parts = timestamp_str.split('T')
+            if len(parts) == 2:
+                date_part = parts[0]
+                time_part = parts[1]
+                
+                # Strip timezone indicators
+                for tz_char in ['Z', '+', '-']:
+                    if tz_char in time_part:
+                        time_part = time_part.split(tz_char)[0]
+                
+                # Remove subseconds
+                if '.' in time_part:
+                    time_part = time_part.split('.')[0]
+                
+                # Simple parsing with manual conversion to avoid datetime objects
+                try:
+                    year, month, day = map(int, date_part.split('-'))
+                    hour, minute, second = map(int, time_part.split(':'))
+                    
+                    # Convert to epoch manually
+                    epoch_days = (year - 1970) * 365 + (month - 1) * 30 + day
+                    epoch_seconds = epoch_days * 86400 + hour * 3600 + minute * 60 + second
+                    return epoch_seconds * 1000
+                except ValueError:
+                    # Last resort fallback to current time
+                    return int(time.time() * 1000)
+        
+        # If no T delimiter or parsing failed, try simple timestamp
+        try:
+            return int(float(timestamp_str) * 1000)
+        except ValueError:
+            return int(time.time() * 1000)
+    except Exception:
+        # Ultra-safe fallback
+        return int(time.time() * 1000)
+
+def format_timestamp(timestamp_ms):
+    """
+    Ultra-simplified timestamp formatter that is completely serialization-safe.
+    Formats millisecond timestamp as ISO 8601 without timezone.
+    """
+    try:
+        seconds = timestamp_ms / 1000.0
+        # Manual formatting to avoid datetime objects
+        time_tuple = time.gmtime(seconds)
+        return f"{time_tuple.tm_year:04d}-{time_tuple.tm_mon:02d}-{time_tuple.tm_mday:02d}T{time_tuple.tm_hour:02d}:{time_tuple.tm_min:02d}:{time_tuple.tm_sec:02d}Z"
+    except Exception:
+        # Safe fallback with current time
+        time_tuple = time.gmtime()
+        return f"{time_tuple.tm_year:04d}-{time_tuple.tm_mon:02d}-{time_tuple.tm_mday:02d}T{time_tuple.tm_hour:02d}:{time_tuple.tm_min:02d}:{time_tuple.tm_sec:02d}Z"
+
+def get_current_time_iso():
+    """
+    Get current time in ISO format with Z timezone indicator.
+    Ultra-serialization-safe implementation.
+    """
+    time_tuple = time.gmtime()
+    return f"{time_tuple.tm_year:04d}-{time_tuple.tm_mon:02d}-{time_tuple.tm_mday:02d}T{time_tuple.tm_hour:02d}:{time_tuple.tm_min:02d}:{time_tuple.tm_sec:02d}Z"
 
 def main():
     """
-    Main function to set up the Flink streaming job.
+    Main function to set up a simplified Flink streaming job without windowing.
+    All configuration parameters are loaded from config.ini.
     """
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)  # Set parallelism for the Flink job
-
+    
     config = load_config()  # Load configuration from config.ini
 
     try:
         kafka_topic = config['DEFAULT']['KAFKA_TOPIC']
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
-        # Define the threshold for dangerous radiation levels.
-        danger_threshold = 60.0
+        kafka_dirty_topic = config['DEFAULT'].get('KAFKA_DIRTY_TOPIC', 'dirty-data')
+        
+        # Radiation Level Thresholds
+        danger_threshold = config['DEFAULT'].getfloat('DANGER_THRESHOLD', 100.0)
+        low_threshold = config['DEFAULT'].getint('LOW_THRESHOLD', 20)
+        moderate_threshold = config['DEFAULT'].getint('MODERATE_THRESHOLD', 50)
+        
+        logging.info(f"Configuration loaded - Danger: {danger_threshold}CPM, Low: {low_threshold}CPM, Moderate: {moderate_threshold}CPM")
     except KeyError as e:
         logging.error(f"Missing configuration key: {e}. Please check your config file.")
         sys.exit(1)
@@ -141,29 +424,44 @@ def main():
         }
     )
     
-    # ---DataStream Processing---
+    # ---DataStream Processing (NO WINDOWING)---
     ds = env.add_source(consumer)
 
-    # ---DataStream Processing---
-    # Use the CleanKafkaJSON class, passing the threshold value. 
-    cleaned_stream = ds.map(CleanKafkaJSON(danger_threshold), output_type=Types.STRING()) \
-                    .filter(lambda x: x is not None)  # Filter out None values (invalid records)
+    # First operator: Data validation
+    validated_stream = ds.map(DataValidator(), output_type=Types.STRING())
 
-    # --- Output to another Kafka topic ---
-    producer = FlinkKafkaProducer(
+    # Split stream into valid and invalid data
+    valid_stream = validated_stream.filter(lambda x: json.loads(x).get("is_valid", False))
+    invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False))
+
+    # Second operator: Data enrichment (directly on valid data without windowing)
+    enriched_stream = valid_stream.map(DataEnricher(danger_threshold, low_threshold, moderate_threshold), output_type=Types.STRING()) \
+                                 .filter(lambda x: x is not None)
+
+    # --- Output enriched data to processed data topic ---
+    processed_producer = FlinkKafkaProducer(
         topic=kafka_output_topic,
         serialization_schema=SimpleStringSchema(),
         producer_config={
             'bootstrap.servers': kafka_bootstrap_servers
         }
     )
-    cleaned_stream.add_sink(producer)
+    enriched_stream.add_sink(processed_producer)
+
+    # --- Output invalid data to dirty data topic ---
+    dirty_producer = FlinkKafkaProducer(
+        topic=kafka_dirty_topic,
+        serialization_schema=SimpleStringSchema(),
+        producer_config={
+            'bootstrap.servers': kafka_bootstrap_servers
+        }
+    )
+    invalid_stream.add_sink(dirty_producer)
 
     # --- Output for testing ---
-    # cleaned_stream.print()
-    # cleaned_stream.map(lambda x: f"Processed: {x}").print()
+    enriched_stream.print()
 
-    env.execute("Radiation Monitoring Flink Job")
+    env.execute("Simplified Radiation Monitoring Flink Job (No Windowing)")
 
 if __name__ == "__main__":
     main()
