@@ -41,7 +41,7 @@ Data Provider → Kafka → Flink → Kafka → FastAPI → WebSocket → React 
 # Development deployment (optimized for 4 vCPUs, 8GB RAM)
 .\deploy_scaled_system.bat
 
-# Production deployment 
+# Production deployment
 .\deploy_production.bat
 ```
 
@@ -84,11 +84,13 @@ docker-compose -f docker-compose.prod.yaml up --build
 ### Production Deployment
 
 **Windows users**:
+
 ```batch
 .\deploy_production.bat
 ```
 
 **Linux/Mac users**:
+
 ```bash
 docker-compose -f docker-compose.prod.yaml up --build
 ```
@@ -113,26 +115,27 @@ Additional services in production:
     - Filters invalid records (unit must be 'cpm')
     - Enriches with danger levels and timestamps
     - **Multiple Output Streams**:
-      - `processed-data-output` → Clean, valid data for frontend
-      - `dirty-data` → Invalid/corrupted data for monitoring
-      - `late-data` → Late-arriving data for analysis
+        - `processed-data-output` → Clean, valid data for frontend
+        - `dirty-data` → Invalid/corrupted data for monitoring
+        - `late-data` → Late-arriving data for analysis
 3. **Real-time API**: FastAPI consumes processed data and broadcasts via WebSocket
 4. **Visualization**: React frontend connects to WebSocket and displays data on interactive map
 
 ### Kafka Topics Architecture
 
-| Topic | Purpose | Consumer |
-|-------|---------|----------|
-| `radiation-data` | Raw sensor data input | Flink (source) |
-| `processed-data-output` | Clean, enriched data | Backend → Frontend |
-| `dirty-data` | Invalid/corrupted records | Monitoring systems |
-| `late-data` | Late-arriving measurements | Data recovery workflows |
+| Topic                   | Purpose                    | Consumer                |
+| ----------------------- | -------------------------- | ----------------------- |
+| `radiation-data`        | Raw sensor data input      | Flink (source)          |
+| `processed-data-output` | Clean, enriched data       | Backend → Frontend      |
+| `dirty-data`            | Invalid/corrupted records  | Monitoring systems      |
+| `late-data`             | Late-arriving measurements | Data recovery workflows |
 
 This multi-topic approach ensures:
-- **Data Quality**: Clean separation of valid vs invalid data
-- **Monitoring**: Track data quality and rejection rates  
-- **Auditing**: Complete data lineage and audit trail
-- **Recovery**: Handle late-arriving or missed data
+
+-   **Data Quality**: Clean separation of valid vs invalid data
+-   **Monitoring**: Track data quality and rejection rates
+-   **Auditing**: Complete data lineage and audit trail
+-   **Recovery**: Handle late-arriving or missed data
 
 ### Key Components Explained
 
