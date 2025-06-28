@@ -18,6 +18,11 @@ export default function MapView({
     type: "FeatureCollection",
     features: [],
   });
+  const [viewState, setViewState] = useState({
+    latitude: 0,
+    longitude: 0,
+    zoom: 2
+  });
 
   const thresholdRef = useRef(threshold);
   useEffect(() => {
@@ -170,6 +175,17 @@ export default function MapView({
     };
   }, [connectWebSocket]);
 
+  // Update view state when user location changes
+  useEffect(() => {
+    if (userLocation) {
+      setViewState({
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        zoom: 8
+      });
+    }
+  }, [userLocation]);
+
   // Getting the user's current location
   useEffect(() => {
     if (navigator.geolocation) {
@@ -213,7 +229,8 @@ export default function MapView({
 
       <Map
         ref={mapRef}
-        initialViewState={{ latitude: 35.6762, longitude: 139.6503, zoom: 6 }} // Tokyo area for better default view
+        {...viewState}
+        onMove={evt => setViewState(evt.viewState)}
         style={{ width: "100vw", height: "100vh" }}
         mapStyle="mapbox://styles/mapbox/light-v10"
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
