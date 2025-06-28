@@ -42,7 +42,7 @@ function ConfigPanel({
         />
       </div>
 
-      <div className="mb-6">
+      {/* <div className="mb-6">
         <label className="block mb-1 font-medium">{"Time Window:"}</label>
         <input
           type="datetime-local"
@@ -56,7 +56,7 @@ function ConfigPanel({
           onChange={(e) => setEndTime(e.target.value)}
           className="w-full border rounded px-2 py-1"
         />
-      </div>
+      </div> */}
 
       <div className="mb-6">
         <label className="block mb-1 font-medium">

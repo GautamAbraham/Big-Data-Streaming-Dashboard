@@ -10,7 +10,7 @@ function App() {
   const [userLocation, setUserLocation] = useState(null);
 
   // configuration states
-  const [threshold, setThreshold] = useState(60);
+  const [threshold, setThreshold] = useState(500);
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
