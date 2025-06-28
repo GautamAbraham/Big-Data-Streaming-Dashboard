@@ -1,14 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-export default function MapView({ userLocation, setUserLocation }) {
+export default function MapView({
+  userLocation,
+  setUserLocation,
+  threshold,
+  playbackSpeed,
+  setAlertMessages,
+}) {
   const mapRef = useRef();
-
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
   });
+
+  const thresholdRef = useRef(threshold);
+  useEffect(() => {
+    thresholdRef.current = threshold;
+  }, [threshold]);
 
   const circleColor = [
     "match",
@@ -19,36 +29,58 @@ export default function MapView({ userLocation, setUserLocation }) {
     "#6b7280"
   ];
 
-
   useEffect(() => {
-    const wsUrl = "ws://localhost:8000/ws"; // hardcoded for testing
-    console.log("WebSocket connecting to:", wsUrl); // Debug log
-    const ws = new WebSocket(wsUrl);
+    const wsUrl = "ws://localhost:8000/ws";
+    let ws;
     let buffer = [];
-    let intervalId;
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        const lat = Number(data.lat);
-        const lon = Number(data.lon);
-        if (!isNaN(lat) && !isNaN(lon)) {
-          const feature = {
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              coordinates: [lon, lat],
-            },
-            properties: data,
-          };
-          buffer.push(feature);
+    function connect() {
+      ws = new window.WebSocket(wsUrl);
+
+      ws.onopen = () => console.log("WebSocket connected");
+      ws.onclose = () => {
+        console.log("WebSocket closed. Reconnecting in 2s...");
+        setTimeout(connect, 2000);
+      };
+      ws.onerror = (e) => {
+        console.error("WebSocket error:", e);
+        ws.close();
+      };
+      ws.onmessage = (event) => {
+        //console.log("Current threshold:", threshold, "Current value:", value);
+        try {
+          const data = JSON.parse(event.data);
+          const lat = Number(data.lat);
+          const lon = Number(data.lon);
+          const value = Number(data.value);
+          
+          if (!isNaN(lat) && !isNaN(lon) && value >= thresholdRef.current) {
+           
+              setAlertMessages((prev) => [
+                ...prev,
+                `CRITICAL: CPM reached ${value} at [${lat.toFixed(2)}, ${lon.toFixed(2)}]!`,
+              ]);
+           
+            const feature = {
+              type: "Feature",
+              geometry: {
+                type: "Point",
+                coordinates: [lon, lat],
+              },
+              properties: data,
+            };
+            buffer.push(feature);
+          }
+        } catch (e) {
+          console.warn("parse error", e);
         }
-      } catch (e) {
-        // Ignore parse errors
-      }
-    };
+      };
+    }
 
-    intervalId = setInterval(() => {
+    connect();
+
+    // Update geojson every interval, using playbackSpeed
+    const intervalId = setInterval(() => {
       if (buffer.length > 0) {
         setGeojson((prev) => ({
           ...prev,
@@ -56,16 +88,14 @@ export default function MapView({ userLocation, setUserLocation }) {
         }));
         buffer = [];
       }
-    }, 100);
-
+    }, Math.max(100, 1000 / Math.max(playbackSpeed, 0.1))); 
     return () => {
-      ws.close();
+      ws && ws.close();
       clearInterval(intervalId);
     };
-  }, []);
+  }, [threshold, playbackSpeed, setAlertMessages]);
 
-
-  // getting the user's current location
+  // Get user geolocation
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -81,8 +111,7 @@ export default function MapView({ userLocation, setUserLocation }) {
         { enableHighAccuracy: true }
       );
     }
-  }, []);
-
+  }, [setUserLocation]);
 
   return (
     <Map
@@ -104,8 +133,7 @@ export default function MapView({ userLocation, setUserLocation }) {
           }}
         />
       </Source>
-
-      {/* Render user location marker if available */}
+      {/* User location marker */}
       {userLocation && (
         <Marker
           latitude={userLocation.latitude}
@@ -116,7 +144,6 @@ export default function MapView({ userLocation, setUserLocation }) {
           <div className="h-5 w-5 bg-blue-500 rounded-full border-2 border-white shadow-lg" />
         </Marker>
       )}
-      
     </Map>
   );
 }
