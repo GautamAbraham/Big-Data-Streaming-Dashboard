@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 export default function MapView({
@@ -8,12 +8,12 @@ export default function MapView({
   threshold,
   playbackSpeed,
   setAlertMessages,
+  setConnectionStatus,
+  setDataStats,
 }) {
   const mapRef = useRef();
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [dataStats, setDataStats] = useState({ total: 0, lastUpdate: null });
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
@@ -21,7 +21,7 @@ export default function MapView({
   const [viewState, setViewState] = useState({
     latitude: 0,
     longitude: 0,
-    zoom: 2
+    zoom: 2,
   });
 
   const thresholdRef = useRef(threshold);
@@ -29,28 +29,38 @@ export default function MapView({
     thresholdRef.current = threshold;
   }, [threshold]);
 
+
   // Enhanced color mapping for radiation levels
   const circleColor = [
     "case",
-    [">=", ["get", "value"], 100], "#dc2626", // Very high (red)
-    [">=", ["get", "value"], 50], "#ea580c",  // High (orange-red)
-    [">=", ["get", "value"], 20], "#eab308",  // Moderate (yellow)
-    [">=", ["get", "value"], 10], "#22c55e",  // Low (green)
-    "#6b7280" // Very low/unknown (gray)
+    [">=", ["get", "value"], 100],
+    "#dc2626", // Very high (red)
+    [">=", ["get", "value"], 50],
+    "#ea580c", // High (orange-red)
+    [">=", ["get", "value"], 20],
+    "#eab308", // Moderate (yellow)
+    [">=", ["get", "value"], 10],
+    "#22c55e", // Low (green)
+    "#6b7280", // Very low/unknown (gray)
   ];
 
   const circleRadius = [
     "case",
-    [">=", ["get", "value"], 100], 8,
-    [">=", ["get", "value"], 50], 6,
-    [">=", ["get", "value"], 20], 5,
-    4
+    [">=", ["get", "value"], 100],
+    8,
+    [">=", ["get", "value"], 50],
+    6,
+    [">=", ["get", "value"], 20],
+    5,
+    4,
   ];
 
+  
+  // WebSocket connection and message handling
   const connectWebSocket = useCallback(() => {
     const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
     console.log("WebSocket connecting to:", wsUrl);
-    
+
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return; // Already connected
     }
@@ -63,7 +73,7 @@ export default function MapView({
     ws.onopen = () => {
       console.log("WebSocket connected");
       setConnectionStatus('connected');
-      
+
       // Start buffering timer with playback speed
       const updateInterval = Math.max(50, 1000 / Math.max(playbackSpeed, 0.1));
       bufferTimer = setInterval(() => {
@@ -100,7 +110,7 @@ export default function MapView({
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        
+
         // Handle heartbeat messages
         if (data.type === 'heartbeat') {
           console.log("Received heartbeat");
@@ -112,7 +122,7 @@ export default function MapView({
         const lon = Number(data.lon);
         const value = Number(data.value);
 
-        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && 
+        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 &&
             lon >= -180 && lon <= 180 && !isNaN(value)) {
               if (value >= thresholdRef.current) {
                 setAlertMessages((prev) => [
@@ -133,7 +143,7 @@ export default function MapView({
       console.log("WebSocket disconnected");
       setConnectionStatus('disconnected');
       clearInterval(bufferTimer);
-      
+
       // Auto-reconnect after 3 seconds
       reconnectTimeoutRef.current = setTimeout(() => {
         connectWebSocket();
@@ -151,7 +161,8 @@ export default function MapView({
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [playbackSpeed, setAlertMessages]);
+  }, [playbackSpeed, setAlertMessages, setConnectionStatus, setDataStats]);
+
 
   // Helper function to determine radiation level
   const getLevelFromValue = (value) => {
@@ -164,7 +175,7 @@ export default function MapView({
 
   useEffect(() => {
     connectWebSocket();
-    
+
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -181,7 +192,7 @@ export default function MapView({
       setViewState({
         latitude: userLocation.latitude,
         longitude: userLocation.longitude,
-        zoom: 8
+        zoom: 8,
       });
     }
   }, [userLocation]);
@@ -205,32 +216,14 @@ export default function MapView({
   }, [setUserLocation]);
 
   // Debug logging (can be removed in production)
-  console.log(`Features count: ${geojson.features.length}, Status: ${connectionStatus}`);
+  console.log(`Features count: ${geojson.features.length}`);
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
-      {/* Connection Status Indicator */}
-      <div style={{
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        zIndex: 1000,
-        background: connectionStatus === 'connected' ? '#22c55e' : '#ef4444',
-        color: 'white',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        fontSize: '12px'
-      }}>
-        {connectionStatus === 'connected' ? '● Connected' : '● Disconnected'}
-        <div style={{ fontSize: '10px', marginTop: '2px' }}>
-          Points: {geojson.features.length} | Total: {dataStats.total}
-        </div>
-      </div>
-
+    <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <Map
         ref={mapRef}
         {...viewState}
-        onMove={evt => setViewState(evt.viewState)}
+        onMove={(evt) => setViewState(evt.viewState)}
         style={{ width: "100vw", height: "100vh" }}
         mapStyle="mapbox://styles/mapbox/light-v10"
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
@@ -245,7 +238,7 @@ export default function MapView({
               "circle-color": circleColor,
               "circle-opacity": 0.8,
               "circle-stroke-width": 1,
-              "circle-stroke-color": "#ffffff"
+              "circle-stroke-color": "#ffffff",
             }}
           />
         </Source>
