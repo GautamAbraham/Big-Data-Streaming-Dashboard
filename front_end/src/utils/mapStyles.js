@@ -15,3 +15,12 @@ export function getCircleRadius(thresholds = [100, 50, 20], radii = [8, 6, 5, 4]
   expr.push(radii[radii.length - 1]);
   return expr;
 }
+
+export function getLevelFromValue(value) {
+  if (value == null) return "very-low";
+  if (value >= 100) return "very-high";
+  if (value >= 50) return "high";
+  if (value >= 20) return "moderate";
+  if (value >= 10) return "low";
+  return "very-low";
+}

@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useWebSocket } from "../hooks/useWebsocket";
-import { getCircleColor, getCircleRadius } from "../utils/mapStyles";
+import { getCircleColor, getCircleRadius, getLevelFromValue } from "../utils/mapStyles";
 import { useDataStats } from "../hooks/useDatastats";
+import { useMapClick, usePointerCursor } from "../utils/mapInteractions";
+import InfoPopup from "./InfoPopup";
 
 
 export default function MapView({userLocation, setUserLocation, threshold, playbackSpeed, setAlertMessages, setConnectionStatus, setDataStats}) {
@@ -20,24 +22,20 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
     longitude: 0,
     zoom: 2,
   });
+  
+  // state to track clicked point on the map
+  const [selectedPoint, setSelectedPoint] = useState(null);
 
   // color mapping for radiation levels
   const circleColor = getCircleColor();
   const circleRadius = getCircleRadius();
 
+  // mouse interaction hooks for the map
+  const onMouseMove = usePointerCursor(mapRef);
+  const onMapClick  = useMapClick(setSelectedPoint);
 
   // hook to set up data statistics
   useDataStats(geojson, setDataStats);
-
-  
-  // Helper to categorize radiation levels
-  const getLevelFromValue = useCallback((value) => {
-    if (value >= 100) return "very-high";
-    if (value >= 50) return "high";
-    if (value >= 20) return "moderate";
-    if (value >= 10) return "low";
-    return "very-low";
-  }, []);
 
 
   // Buffer and add incoming data points
@@ -117,8 +115,10 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <Map
         ref={mapRef}
-        {...viewState}
-        onMove={(evt) => setViewState(evt.viewState)}
+        initialViewState={viewState}
+        onMoveEnd={(evt) => setViewState(evt.viewState)}
+        onMouseMove={onMouseMove}
+        onClick={onMapClick}
         style={{ width: "100vw", height: "100vh" }}
         mapStyle="mapbox://styles/mapbox/light-v10"
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
@@ -143,6 +143,15 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
             latitude={userLocation.latitude}
             longitude={userLocation.longitude}
             color="blue"
+          />
+        )}
+
+        {selectedPoint && (
+          <InfoPopup
+            latitude={selectedPoint.geometry.coordinates[1]}
+            longitude={selectedPoint.geometry.coordinates[0]}
+            cpm={selectedPoint.properties.value}
+            setSelectedPoint={setSelectedPoint}
           />
         )}
       </Map>
