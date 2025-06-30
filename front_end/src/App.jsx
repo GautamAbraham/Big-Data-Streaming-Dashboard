@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import MapView from "./components/MapView";
 import Navbar from "./components/Navbar";
 import ConfigPanel from "./components/ConfigPanel";
@@ -12,15 +12,18 @@ function App() {
   // configuration states
   const [threshold, setThreshold] = useState(500);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [dataStream, setDataStream] = useState(null);
 
   // alert state
-  const [alertQueue, setAlertQueue] = useState([]);
   const [alertMessages, setAlertMessages] = useState([]);
 
   // connection status and data stats
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [dataStats, setDataStats] = useState({ total: 0, lastUpdate: null });
+  const [dataStats, setDataStats] = useState({
+    lastUpdate: null,
+    high: 0,
+    medium: 0,
+    low: 0
+  });
 
 
   // --- AUTO DISMISS ALERT: PLACE THIS RIGHT AFTER THE alertMessages state ---
