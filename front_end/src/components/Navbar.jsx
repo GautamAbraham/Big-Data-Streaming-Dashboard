@@ -25,7 +25,7 @@ function Navbar({ toggleSidebar, connectionStatus, dataStats }) {
               : "Disconnected from server"}
           </div>
         </div>
-        <span className="text-sm font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded">
+        <span className="text-sm font-semibold text-gray-800 px-2 py-0.5 rounded">
           <span className="text-red-600 font-bold">High:</span> {high}
           <span className="mx-2 text-gray-400">|</span>
           <span className="text-yellow-600 font-bold">Medium:</span> {medium}
