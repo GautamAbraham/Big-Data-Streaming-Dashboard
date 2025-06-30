@@ -1,192 +1,86 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import ReactMapGL, { Source, Layer, Marker, Map } from "react-map-gl";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
+import { useWebSocket } from "../hooks/useWebsocket";
+import { getCircleColor, getCircleRadius, getLevelFromValue } from "../utils/mapStyles";
+import { useDataStats } from "../hooks/useDatastats";
+import { useMapClick, usePointerCursor } from "../utils/mapInteractions";
+import InfoPopup from "./InfoPopup";
 
-export default function MapView({
-  userLocation,
-  setUserLocation,
-  threshold,
-  playbackSpeed,
-  setAlertMessages,
-}) {
+
+export default function MapView({userLocation, setUserLocation, threshold, playbackSpeed, setAlertMessages, setConnectionStatus, setDataStats}) {
+
   const mapRef = useRef();
-  const wsRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [dataStats, setDataStats] = useState({ total: 0, lastUpdate: null });
+
   const [geojson, setGeojson] = useState({
     type: "FeatureCollection",
     features: [],
   });
+
   const [viewState, setViewState] = useState({
     latitude: 0,
     longitude: 0,
-    zoom: 2
+    zoom: 2,
+  });
+  
+  // state to track clicked point on the map
+  const [selectedPoint, setSelectedPoint] = useState(null);
+
+  // color mapping for radiation levels
+  const circleColor = getCircleColor();
+  const circleRadius = getCircleRadius();
+
+  // mouse interaction hooks for the map
+  const onMouseMove = usePointerCursor(mapRef);
+  const onMapClick  = useMapClick(setSelectedPoint);
+
+  // hook to set up data statistics
+  useDataStats(geojson, setDataStats);
+
+
+  // Buffer and add incoming data points
+  const handleDataPoints = useCallback((points) => {
+      const newFeatures = points.map((d) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [d.lon, d.lat] },
+        properties: {
+          ...d,
+          level: getLevelFromValue(d.value),
+          timestamp: new Date().toISOString(),
+        },
+      }));
+      setGeojson((gj) => ({
+        ...gj,
+        features: [...gj.features, ...newFeatures].slice(-2000),
+      }));
+    }, [getLevelFromValue]
+  );
+
+
+  const handleConnectionStatus = useCallback((status) => {
+      setConnectionStatus(status);
+    }, [setConnectionStatus]
+  );
+
+
+  const handleAlert = useCallback((msg) => {
+      setAlertMessages((list) => [...list, msg]);
+    }, [setAlertMessages]
+  );
+
+
+  // Use custom WebSocket hook
+  useWebSocket({
+    wsUrl: import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws",
+    playbackSpeed,
+    threshold,
+    onDataPoints: handleDataPoints,
+    onConnectionStatus: handleConnectionStatus,
+    onAlert: handleAlert,
   });
 
-  const thresholdRef = useRef(threshold);
-  useEffect(() => {
-    thresholdRef.current = threshold;
-  }, [threshold]);
 
-  // Enhanced color mapping for radiation levels
-  const circleColor = [
-    "case",
-    [">=", ["get", "value"], 100], "#dc2626", // Very high (red)
-    [">=", ["get", "value"], 50], "#ea580c",  // High (orange-red)
-    [">=", ["get", "value"], 20], "#eab308",  // Moderate (yellow)
-    [">=", ["get", "value"], 10], "#22c55e",  // Low (green)
-    "#6b7280" // Very low/unknown (gray)
-  ];
-
-  const circleRadius = [
-    "case",
-    [">=", ["get", "value"], 100], 8,
-    [">=", ["get", "value"], 50], 6,
-    [">=", ["get", "value"], 20], 5,
-    4
-  ];
-
-  const connectWebSocket = useCallback(() => {
-    const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
-    console.log("WebSocket connecting to:", wsUrl);
-    
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return; // Already connected
-    }
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    let buffer = [];
-    let bufferTimer;
-
-    ws.onopen = () => {
-      console.log("WebSocket connected");
-      setConnectionStatus('connected');
-      
-      // Start buffering timer with playback speed
-      const updateInterval = Math.max(50, 1000 / Math.max(playbackSpeed, 0.1));
-      bufferTimer = setInterval(() => {
-        if (buffer.length > 0) {
-          const newFeatures = buffer.map(data => ({
-            type: "Feature",
-            geometry: {
-              type: "Point",
-              coordinates: [Number(data.lon), Number(data.lat)],
-            },
-            properties: {
-              ...data,
-              level: getLevelFromValue(data.value),
-              timestamp: new Date().toISOString()
-            },
-          }));
-
-          setGeojson(prev => ({
-            ...prev,
-            features: [...prev.features, ...newFeatures].slice(-2000), // Keep last 2000 points
-          }));
-
-          setDataStats(prev => ({
-            total: prev.total + buffer.length,
-            lastUpdate: new Date().toISOString()
-          }));
-
-          console.log(`Added ${buffer.length} new points. Total features: ${newFeatures.length}`);
-          buffer = [];
-        }
-      }, updateInterval);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
-        // Handle heartbeat messages
-        if (data.type === 'heartbeat') {
-          console.log("Received heartbeat");
-          return;
-        }
-
-        // Validate required fields
-        const lat = Number(data.lat);
-        const lon = Number(data.lon);
-        const value = Number(data.value);
-
-        if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && 
-            lon >= -180 && lon <= 180 && !isNaN(value)) {
-              if (value >= thresholdRef.current) {
-                setAlertMessages((prev) => [
-                  ...prev,
-                  `High radiation detected: ${value} at (${lat}, ${lon})`
-                ]);
-              }
-          buffer.push({ ...data, lat, lon, value });
-        } else {
-          console.warn("Invalid data point:", data);
-        }
-      } catch (e) {
-        console.warn("Failed to parse WebSocket message:", e);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log("WebSocket disconnected");
-      setConnectionStatus('disconnected');
-      clearInterval(bufferTimer);
-      
-      // Auto-reconnect after 3 seconds
-      reconnectTimeoutRef.current = setTimeout(() => {
-        connectWebSocket();
-      }, 3000);
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      setConnectionStatus('error');
-    };
-
-    return () => {
-      clearInterval(bufferTimer);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-    };
-  }, [playbackSpeed, setAlertMessages]);
-
-  // Helper function to determine radiation level
-  const getLevelFromValue = (value) => {
-    if (value >= 100) return "very-high";
-    if (value >= 50) return "high";
-    if (value >= 20) return "moderate";
-    if (value >= 10) return "low";
-    return "very-low";
-  };
-
-  useEffect(() => {
-    connectWebSocket();
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-    };
-  }, [connectWebSocket]);
-
-  // Update view state when user location changes
-  useEffect(() => {
-    if (userLocation) {
-      setViewState({
-        latitude: userLocation.latitude,
-        longitude: userLocation.longitude,
-        zoom: 8
-      });
-    }
-  }, [userLocation]);
-
-  // Getting the user's current location
+  // Obtain user's geolocation once
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -203,34 +97,28 @@ export default function MapView({
       );
     }
   }, [setUserLocation]);
+  
 
-  // Debug logging (can be removed in production)
-  console.log(`Features count: ${geojson.features.length}, Status: ${connectionStatus}`);
+  // Pan map to user location when provided
+  useEffect(() => {
+    if (userLocation) {
+      setViewState({
+        latitude: userLocation.latitude,
+        longitude: userLocation.longitude,
+        zoom: 8,
+      });
+    }
+  }, [userLocation]);
+
 
   return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
-      {/* Connection Status Indicator */}
-      <div style={{
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        zIndex: 1000,
-        background: connectionStatus === 'connected' ? '#22c55e' : '#ef4444',
-        color: 'white',
-        padding: '8px 12px',
-        borderRadius: '4px',
-        fontSize: '12px'
-      }}>
-        {connectionStatus === 'connected' ? '● Connected' : '● Disconnected'}
-        <div style={{ fontSize: '10px', marginTop: '2px' }}>
-          Points: {geojson.features.length} | Total: {dataStats.total}
-        </div>
-      </div>
-
+    <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <Map
         ref={mapRef}
-        {...viewState}
-        onMove={evt => setViewState(evt.viewState)}
+        initialViewState={viewState}
+        onMoveEnd={(evt) => setViewState(evt.viewState)}
+        onMouseMove={onMouseMove}
+        onClick={onMapClick}
         style={{ width: "100vw", height: "100vh" }}
         mapStyle="mapbox://styles/mapbox/light-v10"
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
@@ -245,7 +133,7 @@ export default function MapView({
               "circle-color": circleColor,
               "circle-opacity": 0.8,
               "circle-stroke-width": 1,
-              "circle-stroke-color": "#ffffff"
+              "circle-stroke-color": "#ffffff",
             }}
           />
         </Source>
@@ -255,6 +143,15 @@ export default function MapView({
             latitude={userLocation.latitude}
             longitude={userLocation.longitude}
             color="blue"
+          />
+        )}
+
+        {selectedPoint && (
+          <InfoPopup
+            latitude={selectedPoint.geometry.coordinates[1]}
+            longitude={selectedPoint.geometry.coordinates[0]}
+            cpm={selectedPoint.properties.value}
+            setSelectedPoint={setSelectedPoint}
           />
         )}
       </Map>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import MapView from "./components/MapView";
 import Navbar from "./components/Navbar";
 import ConfigPanel from "./components/ConfigPanel";
@@ -11,14 +11,20 @@ function App() {
 
   // configuration states
   const [threshold, setThreshold] = useState(500);
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [dataStream, setDataStream] = useState(null);
 
   // alert state
-  const [alertQueue, setAlertQueue] = useState([]);
   const [alertMessages, setAlertMessages] = useState([]);
+
+  // connection status and data stats
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [dataStats, setDataStats] = useState({
+    lastUpdate: null,
+    high: 0,
+    medium: 0,
+    low: 0
+  });
+
 
   // --- AUTO DISMISS ALERT: PLACE THIS RIGHT AFTER THE alertMessages state ---
   useEffect(() => {
@@ -35,25 +41,30 @@ function App() {
     setAlertMessages([]);
   }, [threshold]);
 
+
   return (
     <div className="flex flex-col h-screen">
-      <Navbar toggleSidebar={() => setSidebarOpen((prev) => !prev)} />
+      <Navbar 
+        toggleSidebar={() => setSidebarOpen((prev) => !prev)}
+        connectionStatus={connectionStatus}
+        dataStats={dataStats}
+      />
+
       {/* sidebar section */}
       <div className="flex flex-1 overflow-hidden">
-        <div className={`${sidebarOpen ? "p-4" : "p-0"}`}>
-          {sidebarOpen && (
-            <ConfigPanel
-              threshold={threshold}
-              setThreshold={setThreshold}
-              startTime={startTime}
-              setStartTime={setStartTime}
-              endTime={endTime}
-              setEndTime={setEndTime}
-              playbackSpeed={playbackSpeed}
-              setPlaybackSpeed={setPlaybackSpeed}
-            />
-          )}
+        <div
+          className={`transform transition-all duration-300 ease-in-out ${
+            sidebarOpen ? "w-72 opacity-100" : "w-0 opacity-0"
+          }`}
+        >
+          <ConfigPanel
+            threshold={threshold}
+            setThreshold={setThreshold}
+            playbackSpeed={playbackSpeed}
+            setPlaybackSpeed={setPlaybackSpeed}
+          />
         </div>
+        
         {/* map section */}
         <div className="flex-1">
           <MapView
@@ -62,6 +73,8 @@ function App() {
             threshold={threshold}
             playbackSpeed={playbackSpeed}
             setAlertMessages={setAlertMessages}
+            setConnectionStatus={setConnectionStatus}
+            setDataStats={setDataStats}
           />
           <Legend userLocation={userLocation} />
           <Alerts messages={alertMessages} />
