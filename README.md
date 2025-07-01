@@ -123,16 +123,19 @@ Additional services in production:
 
 ### Kafka Topics Architecture
 
-| Topic                   | Purpose                    | Consumer                |
-| ----------------------- | -------------------------- | ----------------------- |
-| `radiation-data`        | Raw sensor data input      | Flink (source)          |
-| `processed-data-output` | Clean, enriched data       | Backend → Frontend      |
-| `dirty-data`            | Invalid/corrupted records  | Monitoring systems      |
-| `late-data`             | Late-arriving measurements | Data recovery workflows |
+| Topic                   | Purpose                        | Consumer                | Priority     |
+| ----------------------- | ------------------------------ | ----------------------- | ------------ |
+| `radiation-data`        | Raw sensor data input          | Flink (source)          | N/A          |
+| `processed-data-output` | Clean, enriched normal data    | Backend → Frontend      | Normal       |
+| `critical-data`         | High-priority/dangerous alerts | Backend → Frontend      | **CRITICAL** |
+| `dirty-data`            | Invalid/corrupted records      | Monitoring systems      | Low          |
+| `late-data`             | Late-arriving measurements     | Data recovery workflows | Low          |
 
 This multi-topic approach ensures:
 
 -   **Data Quality**: Clean separation of valid vs invalid data
+-   **Priority Handling**: Critical radiation alerts are processed with higher priority
+-   **Real-time Alerting**: Dangerous radiation levels trigger immediate notifications
 -   **Monitoring**: Track data quality and rejection rates
 -   **Auditing**: Complete data lineage and audit trail
 -   **Recovery**: Handle late-arriving or missed data
@@ -149,9 +152,39 @@ This multi-topic approach ensures:
 #### Backend WebSocket Server
 
 -   **Connection Management**: Handles multiple concurrent WebSocket connections
+-   **Multi-Topic Consumption**: Consumes from both normal and critical data topics
 -   **Error Recovery**: Auto-reconnect logic and connection health monitoring
 -   **Data Broadcasting**: Efficiently sends data to all connected clients
+-   **Priority Handling**: Tags critical data for frontend alerting
 -   **Health Endpoint**: `/health` for monitoring system status
+
+#### Critical Data Sink & Alerting
+
+The system implements a dedicated **Critical Data Sink** for high-priority radiation alerts:
+
+**Critical Data Criteria:**
+
+-   `dangerous = true` (radiation ≥ 100 CPM)
+-   `level = "high"` (radiation ≥ 50 CPM)
+
+**Critical Data Features:**
+
+-   **Dedicated Kafka Topic**: `critical-data` with optimized configuration
+-   **Fast Delivery**: Smaller batch sizes (16KB) and minimal linger time (5ms)
+-   **High Reliability**: More retries (5) and all-replica acknowledgment
+-   **Priority Tagging**: Backend tags critical data with `"data_priority": "critical"`
+-   **Enhanced Logging**: Critical alerts logged with INFO level for monitoring
+-   **Frontend Integration**: Critical data can trigger special UI alerts/notifications
+
+**Configuration (Optimized for Speed):**
+
+```
+batch.size: 16384 (16KB for faster delivery)
+linger.ms: 5 (minimal delay)
+compression.type: snappy (fast compression)
+acks: all (maximum reliability)
+retries: 5 (enhanced fault tolerance)
+```
 
 #### Frontend Real-time Visualization
 

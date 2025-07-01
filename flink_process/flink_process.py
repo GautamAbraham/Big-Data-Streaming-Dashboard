@@ -501,6 +501,7 @@ def main():
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         kafka_dirty_topic = config['DEFAULT'].get('KAFKA_DIRTY_TOPIC', 'dirty-data')
+        kafka_critical_topic = config['DEFAULT'].get('KAFKA_CRITICAL_TOPIC', 'critical-data')
         
         # Parallelism Configuration
         source_parallelism = config['DEFAULT'].getint('SOURCE_PARALLELISM', 2)
@@ -565,8 +566,17 @@ def main():
                                  .set_parallelism(enrichment_parallelism) \
                                  .name("Data Enrichment")
 
+    # Split enriched stream into critical and normal data
+    critical_stream = enriched_stream.filter(lambda x: json.loads(x).get("dangerous", False) or json.loads(x).get("level") == "high") \
+                                    .set_parallelism(enrichment_parallelism) \
+                                    .name("Critical Data Filter")
+    
+    normal_stream = enriched_stream.filter(lambda x: not (json.loads(x).get("dangerous", False) or json.loads(x).get("level") == "high")) \
+                                  .set_parallelism(enrichment_parallelism) \
+                                  .name("Normal Data Filter")
+
     # --- Scalable Output Sinks ---
-    # Output processed data with alerts to main topic
+    # Output normal processed data to main topic
     processed_producer = FlinkKafkaProducer(
         topic=kafka_output_topic,
         serialization_schema=SimpleStringSchema(),
@@ -580,9 +590,28 @@ def main():
             'buffer.memory': '67108864'  # 64MB buffer (string)
         }
     )
-    enriched_stream.add_sink(processed_producer) \
+    normal_stream.add_sink(processed_producer) \
+                 .set_parallelism(sink_parallelism) \
+                 .name("Processed Data Sink")
+
+    # Output critical/dangerous data to dedicated critical topic
+    critical_producer = FlinkKafkaProducer(
+        topic=kafka_critical_topic,
+        serialization_schema=SimpleStringSchema(),
+        producer_config={
+            'bootstrap.servers': kafka_bootstrap_servers,
+            'batch.size': '16384',  # Smaller batch for faster delivery of critical data
+            'linger.ms': '5',       # Minimal delay for critical data (string)
+            'compression.type': 'snappy',  # Fast compression for critical data
+            'acks': 'all',          # All replicas must acknowledge for reliability
+            'retries': '5',         # More retries for critical data
+            'buffer.memory': '33554432',  # 32MB buffer for critical data
+            'request.timeout.ms': '10000'  # Shorter timeout for critical data
+        }
+    )
+    critical_stream.add_sink(critical_producer) \
                    .set_parallelism(sink_parallelism) \
-                   .name("Processed Data Sink")
+                   .name("Critical Data Sink")
 
     # Output invalid data to dirty data topic with optimized configuration
     dirty_producer = FlinkKafkaProducer(
@@ -601,7 +630,8 @@ def main():
                  .name("Dirty Data Sink")
 
     # --- Debug output with parallelism ---
-    enriched_stream.print().set_parallelism(1).name("Debug Print")
+    normal_stream.print().set_parallelism(1).name("Normal Data Debug Print")
+    critical_stream.print().set_parallelism(1).name("Critical Data Debug Print")
 
     env.execute("Scalable Radiation Monitoring Flink Job")
 
