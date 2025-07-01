@@ -1,5 +1,5 @@
 services:
-  # Frontend with production build
+  # Frontend with production build and resource limits
   frontend:
     build:
       context: ./front_end
@@ -16,8 +16,16 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
 
-  # Enhanced backend with health checks
+  # Enhanced backend with health checks and resource limits
   backend:
     build: ./backend
     ports:
@@ -36,8 +44,16 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
 
-  # Kafka with health checks
+  # Optimized Kafka with health checks and resource limits
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     hostname: kafka

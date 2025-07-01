@@ -48,7 +48,5 @@ docker-compose -f docker-compose.prod.yaml ps
 echo.
 echo Production deployment complete!
 echo Monitor at: http://localhost:8081 (Flink Dashboard)
-echo Frontend: http://localhost:3000
-echo Backend API: http://localhost:8000
-echo Prometheus: http://localhost:9090
+echo Frontend at: http://localhost:3000
 pause

@@ -388,13 +388,111 @@ def get_current_time_iso():
     time_tuple = time.gmtime()
     return f"{time_tuple.tm_year:04d}-{time_tuple.tm_mon:02d}-{time_tuple.tm_mday:02d}T{time_tuple.tm_hour:02d}:{time_tuple.tm_min:02d}:{time_tuple.tm_sec:02d}Z"
 
+class ParallelAggregator(MapFunction):
+    """
+    Third operator: Performs parallel aggregation and statistics calculation.
+    Calculates running statistics for radiation levels in parallel.
+    """
+
+    def __init__(self):
+        self.record_count = 0
+        self.sum_value = 0.0
+        self.max_value = 0.0
+        self.high_radiation_count = 0
+
+    def map(self, value: str) -> str:
+        """
+        Aggregate statistics for radiation data in parallel.
+        :param value: JSON string from DataEnricher
+        :return: Enriched JSON string with aggregated statistics
+        """
+        try:
+            data = json.loads(value)
+            
+            # Extract radiation value
+            radiation_value = data.get("value", 0)
+            level = data.get("level", "unknown")
+            
+            # Update running statistics
+            self.record_count += 1
+            self.sum_value += radiation_value
+            self.max_value = max(self.max_value, radiation_value)
+            
+            if level == "high":
+                self.high_radiation_count += 1
+            
+            # Calculate running average
+            avg_value = self.sum_value / self.record_count if self.record_count > 0 else 0
+            
+            # Add aggregated statistics to the record
+            data["statistics"] = {
+                "running_count": self.record_count,
+                "running_average": round(avg_value, 2),
+                "running_max": self.max_value,
+                "high_radiation_events": self.high_radiation_count,
+                "high_radiation_percentage": round((self.high_radiation_count / self.record_count) * 100, 2) if self.record_count > 0 else 0
+            }
+            
+            return json.dumps(data)
+            
+        except Exception as e:
+            print(f"Error in ParallelAggregator: {e}")
+            return value  # Return original value if processing fails
+
+class ParallelAlertProcessor(MapFunction):
+    """
+    Fourth operator: Processes alerts and notifications in parallel.
+    Generates alert metadata and priority levels.
+    """
+
+    def map(self, value: str) -> str:
+        """
+        Process alerts and add alert metadata.
+        :param value: JSON string with aggregated data
+        :return: JSON string with alert information
+        """
+        try:
+            data = json.loads(value)
+            
+            radiation_value = data.get("value", 0)
+            is_dangerous = data.get("dangerous", False)
+            level = data.get("level", "unknown")
+            
+            # Determine alert priority
+            if is_dangerous:
+                alert_priority = "CRITICAL"
+                alert_message = f"CRITICAL: Radiation level {radiation_value} CPM detected"
+            elif level == "high":
+                alert_priority = "HIGH"
+                alert_message = f"HIGH: Elevated radiation {radiation_value} CPM"
+            elif level == "moderate":
+                alert_priority = "MEDIUM"
+                alert_message = f"MEDIUM: Moderate radiation {radiation_value} CPM"
+            else:
+                alert_priority = "LOW"
+                alert_message = f"LOW: Normal radiation {radiation_value} CPM"
+            
+            # Add alert metadata
+            data["alert"] = {
+                "priority": alert_priority,
+                "message": alert_message,
+                "requires_notification": is_dangerous or level == "high",
+                "alert_timestamp": get_current_time_iso(),
+                "alert_id": f"alert_{int(time.time() * 1000)}_{radiation_value}"
+            }
+            
+            return json.dumps(data)
+            
+        except Exception as e:
+            print(f"Error in ParallelAlertProcessor: {e}")
+            return value
+
 def main():
     """
-    Main function to set up a simplified Flink streaming job without windowing.
+    Main function to set up a Flink streaming job with parallel operators.
     All configuration parameters are loaded from config.ini.
     """
     env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(1)  # Set parallelism for the Flink job
     
     config = load_config()  # Load configuration from config.ini
 
@@ -404,64 +502,108 @@ def main():
         kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
         kafka_dirty_topic = config['DEFAULT'].get('KAFKA_DIRTY_TOPIC', 'dirty-data')
         
+        # Parallelism Configuration
+        source_parallelism = config['DEFAULT'].getint('SOURCE_PARALLELISM', 2)
+        validation_parallelism = config['DEFAULT'].getint('VALIDATION_PARALLELISM', 4)
+        enrichment_parallelism = config['DEFAULT'].getint('ENRICHMENT_PARALLELISM', 4)
+        sink_parallelism = config['DEFAULT'].getint('SINK_PARALLELISM', 2)
+        
+        # Set global parallelism
+        global_parallelism = config['DEFAULT'].getint('GLOBAL_PARALLELISM', 4)
+        env.set_parallelism(global_parallelism)
+        
         # Radiation Level Thresholds
         danger_threshold = config['DEFAULT'].getfloat('DANGER_THRESHOLD', 100.0)
         low_threshold = config['DEFAULT'].getint('LOW_THRESHOLD', 20)
         moderate_threshold = config['DEFAULT'].getint('MODERATE_THRESHOLD', 50)
         
         logging.info(f"Configuration loaded - Danger: {danger_threshold}CPM, Low: {low_threshold}CPM, Moderate: {moderate_threshold}CPM")
+        logging.info(f"Parallelism - Source: {source_parallelism}, Validation: {validation_parallelism}, Enrichment: {enrichment_parallelism}, Sink: {sink_parallelism}")
     except KeyError as e:
         logging.error(f"Missing configuration key: {e}. Please check your config file.")
         sys.exit(1)
 
-    # --- Kafka Consumer using legacy add_source API ---
+    # --- Kafka Consumer with optimized configuration ---
     consumer = FlinkKafkaConsumer(
         topics=kafka_topic,
         deserialization_schema=SimpleStringSchema(),
         properties={
             'bootstrap.servers': kafka_bootstrap_servers,
-            'group.id': 'flink-radiation-monitor'
+            'group.id': 'flink-radiation-monitor',
+            'auto.offset.reset': 'latest',
+            'enable.auto.commit': 'true',
+            'auto.commit.interval.ms': '1000',
+            'fetch.min.bytes': '1024',      # Minimum bytes to fetch
+            'fetch.max.wait.ms': '500',     # Max wait for fetch
+            'max.partition.fetch.bytes': '1048576',  # 1MB max per partition
+            'session.timeout.ms': '30000',  # Session timeout
+            'heartbeat.interval.ms': '10000'  # Heartbeat interval
         }
     )
     
-    # ---DataStream Processing (NO WINDOWING)---
-    ds = env.add_source(consumer)
+    # --- Simple Scalable DataStream Processing ---
+    # Source with configured parallelism
+    ds = env.add_source(consumer).set_parallelism(source_parallelism).name("Kafka Source")
 
-    # First operator: Data validation
-    validated_stream = ds.map(DataValidator(), output_type=Types.STRING())
+    # Validation operator with parallelism
+    validated_stream = ds.map(DataValidator(), output_type=Types.STRING()) \
+                        .set_parallelism(validation_parallelism) \
+                        .name("Data Validation")
 
-    # Split stream into valid and invalid data
-    valid_stream = validated_stream.filter(lambda x: json.loads(x).get("is_valid", False))
-    invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False))
+    # Split stream into valid and invalid data with parallelism
+    valid_stream = validated_stream.filter(lambda x: json.loads(x).get("is_valid", False)) \
+                                  .set_parallelism(validation_parallelism) \
+                                  .name("Valid Data Filter")
+    
+    invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False)) \
+                                    .set_parallelism(validation_parallelism) \
+                                    .name("Invalid Data Filter")
 
-    # Second operator: Data enrichment (directly on valid data without windowing)
+    # Enrichment operator with parallelism
     enriched_stream = valid_stream.map(DataEnricher(danger_threshold, low_threshold, moderate_threshold), output_type=Types.STRING()) \
-                                 .filter(lambda x: x is not None)
+                                 .filter(lambda x: x is not None) \
+                                 .set_parallelism(enrichment_parallelism) \
+                                 .name("Data Enrichment")
 
-    # --- Output enriched data to processed data topic ---
+    # --- Scalable Output Sinks ---
+    # Output processed data with alerts to main topic
     processed_producer = FlinkKafkaProducer(
         topic=kafka_output_topic,
         serialization_schema=SimpleStringSchema(),
         producer_config={
-            'bootstrap.servers': kafka_bootstrap_servers
+            'bootstrap.servers': kafka_bootstrap_servers,
+            'batch.size': '32768',  # Increased batch size for better throughput (string)
+            'linger.ms': '10',      # Small delay for batching (string)
+            'compression.type': 'snappy',  # Enable compression
+            'acks': '1',            # Wait for leader acknowledgment
+            'retries': '3',         # Retry failed sends
+            'buffer.memory': '67108864'  # 64MB buffer (string)
         }
     )
-    enriched_stream.add_sink(processed_producer)
+    enriched_stream.add_sink(processed_producer) \
+                   .set_parallelism(sink_parallelism) \
+                   .name("Processed Data Sink")
 
-    # --- Output invalid data to dirty data topic ---
+    # Output invalid data to dirty data topic with optimized configuration
     dirty_producer = FlinkKafkaProducer(
         topic=kafka_dirty_topic,
         serialization_schema=SimpleStringSchema(),
         producer_config={
-            'bootstrap.servers': kafka_bootstrap_servers
+            'bootstrap.servers': kafka_bootstrap_servers,
+            'batch.size': '16384',  # Batch for dirty data (string)
+            'linger.ms': '20',      # Longer linger for dirty data (string)
+            'compression.type': 'gzip',  # Better compression for dirty data
+            'acks': '1'             # Acknowledge on leader
         }
     )
-    invalid_stream.add_sink(dirty_producer)
+    invalid_stream.add_sink(dirty_producer) \
+                 .set_parallelism(sink_parallelism) \
+                 .name("Dirty Data Sink")
 
-    # --- Output for testing ---
-    enriched_stream.print()
+    # --- Debug output with parallelism ---
+    enriched_stream.print().set_parallelism(1).name("Debug Print")
 
-    env.execute("Simplified Radiation Monitoring Flink Job (No Windowing)")
+    env.execute("Scalable Radiation Monitoring Flink Job")
 
 if __name__ == "__main__":
     main()
