@@ -10,27 +10,25 @@ export function useDataStats(geojson, setDataStats, intervalMs = 5000) {
 
   useEffect(() => {
     const id = setInterval(() => {
-
-      let timestamp = null;
       const feats = geojsonRef.current.features || [];
+      
+      // Early return if no features to avoid unnecessary processing
+      if (feats.length === 0) return;
 
       const { high, medium, low } = feats.reduce(
         (acc, { properties: { level } }) => {
-          if (level === "very-high" || level === "high") {
-            acc.high++;
-          } 
-          else if (level === "moderate") {
-            acc.medium++;
-          } 
-          else acc.low++;
+          switch (level) {
+            case "very-high":
+            case "high": acc.high++; break;
+            case "moderate": acc.medium++; break;
+            default: acc.low++;
+          }
           return acc;
         },
         { high: 0, medium: 0, low: 0 }
       );
 
-      if (feats.length > 0) {
-        timestamp = feats[feats.length - 1].properties?.timestamp || null;
-      }
+      const timestamp = feats[feats.length - 1].properties?.timestamp || null;
 
       setDataStats((prev) => ({ ...prev, high, medium, low, lastUpdate: timestamp }));
     }, intervalMs);

@@ -12,6 +12,7 @@ function App() {
   // configuration states
   const [threshold, setThreshold] = useState(500);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [filterLevel, setFilterLevel] = useState("all");
 
   // alert state
   const [alertMessages, setAlertMessages] = useState([]);
@@ -58,6 +59,8 @@ function App() {
           }`}
         >
           <ConfigPanel
+            filterLevel={filterLevel}
+            setFilterLevel={setFilterLevel}
             threshold={threshold}
             setThreshold={setThreshold}
             playbackSpeed={playbackSpeed}
@@ -72,6 +75,7 @@ function App() {
             setUserLocation={setUserLocation}
             threshold={threshold}
             playbackSpeed={playbackSpeed}
+            filterLevel={filterLevel}
             setAlertMessages={setAlertMessages}
             setConnectionStatus={setConnectionStatus}
             setDataStats={setDataStats}
