@@ -66,8 +66,11 @@ docker-compose -f docker-compose.prod.yaml up --build
 2. **Set up environment variables**:
 
     ```bash
-    cp front_end/.env.example front_end/.env
-    # Edit .env file and add your Mapbox token
+    # Ensure front_end/.env exists with correct values
+    # The .env file should contain:
+    # VITE_MAPBOX_TOKEN=your_mapbox_token
+    # VITE_API_URL=http://localhost:8000
+    # VITE_WS_URL=ws://localhost:8000/ws
     ```
 
 3. **Start all services**:
@@ -239,13 +242,21 @@ retries: 5 (enhanced fault tolerance)
 
 ### Environment Variables
 
-#### Frontend (.env)
+The project uses the `.env` file located in the `front_end/` directory for all environment variable configuration.
+
+#### Frontend Environment Variables (`front_end/.env`)
 
 ```env
 VITE_MAPBOX_TOKEN=your_mapbox_token_here
 VITE_API_URL=http://localhost:8000
 VITE_WS_URL=ws://localhost:8000/ws
 ```
+
+**Setup Instructions**:
+
+1. Copy `front_end/.env.example` to `front_end/.env` (if not already present)
+2. Update the Mapbox token with your own token from https://mapbox.com
+3. Both development and production deployments use this single .env file
 
 #### Backend (config.ini)
 
@@ -351,6 +362,38 @@ docker-compose up frontend --build
 # Check service health
 curl http://localhost:8000/health
 ```
+
+### Service Dependencies & Orchestration
+
+The system uses Docker Compose service dependencies to ensure proper startup order:
+
+**Dependency Chain:**
+
+```
+Kafka (with health check)
+  ↓
+┌─── Data Provider (waits for kafka healthy)
+├─── Flink JobManager (waits for kafka healthy)
+└─── Flink Processor (waits for kafka healthy + jobmanager started)
+         ↓
+    TaskManagers (wait for jobmanager started)
+         ↓
+    Backend (waits for jobmanager started)
+```
+
+**Benefits:**
+
+-   ✅ **No Manual Waits**: Deployment scripts don't need `timeout` commands
+-   ✅ **Automatic Retry**: Services auto-restart if dependencies fail
+-   ✅ **Health Checks**: Kafka health check ensures it's ready before dependents start
+-   ✅ **Parallel Startup**: Independent services start in parallel where possible
+-   ✅ **Graceful Shutdown**: `docker-compose down` stops services in reverse dependency order
+
+**Health Check Configuration:**
+
+-   Kafka includes `nc -z localhost 9092` health check
+-   Services use `condition: service_healthy` for Kafka
+-   Services use `condition: service_started` for other dependencies
 
 ## License
 

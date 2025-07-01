@@ -10,9 +10,8 @@ services:
         VITE_WS_URL: ${VITE_WS_URL}
     ports:
       - "3000:80"
-    environment:
-      - VITE_API_URL=${VITE_API_URL}
-      - VITE_WS_URL=${VITE_WS_URL}
+    env_file:
+      - ./front_end/.env
     restart: unless-stopped
     depends_on:
       - backend

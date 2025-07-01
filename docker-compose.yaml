@@ -6,11 +6,12 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN}
-        VITE_API_URL:      ${VITE_API_URL}
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_WS_URL: ${VITE_WS_URL}
     ports:
       - "3000:80"
-    environment:
-      - VITE_API_URL=${VITE_API_URL}
+    env_file:
+      - ./front_end/.env
     deploy:
       resources:
         limits:
