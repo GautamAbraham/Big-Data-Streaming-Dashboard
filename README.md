@@ -258,6 +258,28 @@ VITE_WS_URL=ws://localhost:8000/ws
 2. Update the Mapbox token with your own token from https://mapbox.com
 3. Both development and production deployments use this single .env file
 
+#### Docker Environment Variable Handling
+
+The system uses **Option A: Direct .env Copy** approach for handling frontend environment variables:
+
+**Build-Time Variables:**
+
+-   The frontend `Dockerfile` directly copies the `.env` file during the build process
+-   Vite configuration loads and injects environment variables during build
+-   Variables prefixed with `VITE_` are embedded into the built application
+
+**Runtime Variables:**
+
+-   Docker Compose services use `env_file: ./front_end/.env` for runtime configuration
+-   Both development (`docker-compose.yaml`) and production (`docker-compose.prod.yaml`) use the same .env file
+-   No duplicate environment variable management required
+
+**Benefits:**
+
+-   Single source of truth for all environment variables
+-   No need to maintain separate .env files or Docker environment sections
+-   Simplified deployment and configuration management
+
 #### Backend (config.ini)
 
 ```ini

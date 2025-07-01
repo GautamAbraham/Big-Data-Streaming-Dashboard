@@ -4,10 +4,6 @@ services:
     build:
       context: ./front_end
       dockerfile: Dockerfile
-      args:
-        VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN}
-        VITE_API_URL: ${VITE_API_URL}
-        VITE_WS_URL: ${VITE_WS_URL}
     ports:
       - "3000:80"
     env_file:
