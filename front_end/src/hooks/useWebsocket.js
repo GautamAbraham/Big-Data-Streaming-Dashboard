@@ -41,7 +41,7 @@ export function useWebSocket({ wsUrl, playbackSpeed, threshold, onDataPoints, on
           !isNaN(value)
         ) {
           if (value >= thresholdRef.current) {
-            onAlert(`High radiation detected: ${value} at (${lat}, ${lon})`);
+            onAlert(`High radiation: ${value} CPM`, value, lat, lon);
           }
           buffer.push({ ...msg, lat, lon, value });
         }

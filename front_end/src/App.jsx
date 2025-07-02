@@ -4,6 +4,7 @@ import Navbar from "./components/Navbar";
 import ConfigPanel from "./components/ConfigPanel";
 import Legend from "./components/Legend";
 import Alerts from "./components/Alerts";
+import { useAlertManager } from "./hooks/useAlertManager";
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -12,9 +13,10 @@ function App() {
   // configuration states
   const [threshold, setThreshold] = useState(500);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [filterLevel, setFilterLevel] = useState("all");
 
-  // alert state
-  const [alertMessages, setAlertMessages] = useState([]);
+  // Use the new alert manager
+  const { alerts, addAlert, dismissAlert, clearAllAlerts } = useAlertManager();
 
   // connection status and data stats
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
@@ -25,21 +27,10 @@ function App() {
     low: 0
   });
 
-
-  // --- AUTO DISMISS ALERT: PLACE THIS RIGHT AFTER THE alertMessages state ---
+  // Clear alerts when threshold changes
   useEffect(() => {
-    if (alertMessages.length > 0) {
-      const timer = setTimeout(() => {
-        setAlertMessages((msgs) => msgs.slice(1));
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [alertMessages]);
-  // --------------------------------------------------------------------------
-  // --- CLEAR ALERTS when CPM threshold changes ---
-  useEffect(() => {
-    setAlertMessages([]);
-  }, [threshold]);
+    clearAllAlerts();
+  }, [threshold, clearAllAlerts]);
 
 
   return (
@@ -58,6 +49,8 @@ function App() {
           }`}
         >
           <ConfigPanel
+            filterLevel={filterLevel}
+            setFilterLevel={setFilterLevel}
             threshold={threshold}
             setThreshold={setThreshold}
             playbackSpeed={playbackSpeed}
@@ -72,12 +65,13 @@ function App() {
             setUserLocation={setUserLocation}
             threshold={threshold}
             playbackSpeed={playbackSpeed}
-            setAlertMessages={setAlertMessages}
+            filterLevel={filterLevel}
+            onAlert={addAlert}
             setConnectionStatus={setConnectionStatus}
             setDataStats={setDataStats}
           />
           <Legend userLocation={userLocation} />
-          <Alerts messages={alertMessages} />
+          <Alerts alerts={alerts} onDismiss={dismissAlert} />
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Source, Layer, Marker, Map } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { useWebSocket } from "../hooks/useWebsocket";
@@ -8,7 +8,7 @@ import { useMapClick, usePointerCursor } from "../utils/mapInteractions";
 import InfoPopup from "./InfoPopup";
 
 
-export default function MapView({userLocation, setUserLocation, threshold, playbackSpeed, setAlertMessages, setConnectionStatus, setDataStats}) {
+export default function MapView({ userLocation, setUserLocation, threshold, playbackSpeed, filterLevel, onAlert, setConnectionStatus, setDataStats }) {
 
   const mapRef = useRef();
 
@@ -27,8 +27,8 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
   const [selectedPoint, setSelectedPoint] = useState(null);
 
   // color mapping for radiation levels
-  const circleColor = getCircleColor();
-  const circleRadius = getCircleRadius();
+  const circleColor = useMemo(() => getCircleColor(), []);
+  const circleRadius = useMemo(() => getCircleRadius(), []);
 
   // mouse interaction hooks for the map
   const onMouseMove = usePointerCursor(mapRef);
@@ -36,6 +36,28 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
 
   // hook to set up data statistics
   useDataStats(geojson, setDataStats);
+
+
+  // Filter geojson based on filterLevel
+  const filteredGeojson = useMemo(() => {
+    if (filterLevel === "all") return geojson;
+    
+    return {
+      ...geojson,
+      features: geojson.features.filter(feature => {
+        const level = feature.properties.level;
+        switch (filterLevel) {
+          case "high":
+            return level === "very-high" || level === "high";
+          case "medium":
+            return level === "moderate";
+          case "low":
+            return level === "low" || level === "very-low";
+          default: return true;
+        }
+      })
+    };
+  }, [geojson, filterLevel]);
 
 
   // Buffer and add incoming data points
@@ -63,10 +85,10 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
   );
 
 
-  const handleAlert = useCallback((msg) => {
-      setAlertMessages((list) => [...list, msg]);
-    }, [setAlertMessages]
-  );
+  const handleAlert = useCallback((message, value, lat, lon) => {
+    const severity = value >= threshold * 2 ? 'critical' : 'warning';
+    onAlert(message, severity, { lat, lon });
+  }, [onAlert, threshold]);
 
 
   // Use custom WebSocket hook
@@ -124,7 +146,7 @@ export default function MapView({userLocation, setUserLocation, threshold, playb
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
         interactiveLayerIds={["radiation-points"]}
       >
-        <Source id="radiation" type="geojson" data={geojson}>
+        <Source id="radiation" type="geojson" data={filteredGeojson}>
           <Layer
             id="radiation-points"
             type="circle"
