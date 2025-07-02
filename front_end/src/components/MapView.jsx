@@ -8,7 +8,7 @@ import { useMapClick, usePointerCursor } from "../utils/mapInteractions";
 import InfoPopup from "./InfoPopup";
 
 
-export default function MapView({ userLocation, setUserLocation, threshold, playbackSpeed, filterLevel, setAlertMessages, setConnectionStatus, setDataStats }) {
+export default function MapView({ userLocation, setUserLocation, threshold, playbackSpeed, filterLevel, onAlert, setConnectionStatus, setDataStats }) {
 
   const mapRef = useRef();
 
@@ -37,7 +37,7 @@ export default function MapView({ userLocation, setUserLocation, threshold, play
   // hook to set up data statistics
   useDataStats(geojson, setDataStats);
 
-  
+
   // Filter geojson based on filterLevel
   const filteredGeojson = useMemo(() => {
     if (filterLevel === "all") return geojson;
@@ -85,10 +85,10 @@ export default function MapView({ userLocation, setUserLocation, threshold, play
   );
 
 
-  const handleAlert = useCallback((msg) => {
-      setAlertMessages((list) => [...list, msg]);
-    }, [setAlertMessages]
-  );
+  const handleAlert = useCallback((message, value, lat, lon) => {
+    const severity = value >= threshold * 2 ? 'critical' : 'warning';
+    onAlert(message, severity, { lat, lon });
+  }, [onAlert, threshold]);
 
 
   // Use custom WebSocket hook
