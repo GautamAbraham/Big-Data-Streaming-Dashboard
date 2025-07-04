@@ -5,28 +5,16 @@ echo    Target: 4 vCPUs, 8 GB RAM
 echo ========================================
 
 echo.
-echo [1/6] Stopping any existing containers...
+echo [1/3] Stopping any existing containers...
 docker-compose down
 docker container prune -f
 
 echo.
-echo [2/6] Building updated images...
+echo [2/3] Building updated images...
 docker-compose build
 
 echo.
-echo [3/6] Starting core services (Kafka)...
-docker-compose up -d kafka
-
-echo.
-echo [4/6] Waiting for Kafka to be ready...
-timeout /t 30 /nobreak
-
-echo.
-echo [5/6] Starting Flink cluster...
-docker-compose up -d flink-jobmanager flink-taskmanager-1 flink-taskmanager-2
-
-echo.
-echo [6/6] Starting all remaining services...
+echo [3/3] Starting all services (Docker Compose will handle dependencies)...
 docker-compose up -d
 
 echo.
@@ -54,6 +42,9 @@ echo ========================================
 
 echo.
 echo Deployment complete! 
+echo Docker Compose is handling service dependencies automatically.
+echo Services will start in the correct order based on health checks.
+echo.
 echo - Flink Dashboard: http://localhost:8081
 echo - Backend API: http://localhost:8000
 echo - Frontend: http://localhost:3000

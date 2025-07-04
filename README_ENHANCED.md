@@ -33,28 +33,6 @@ Data Provider → Kafka → Flink → Kafka → FastAPI → WebSocket → React 
 -   Docker & Docker Compose
 -   Mapbox access token (get from https://mapbox.com)
 
-### Quick Start (Recommended)
-
-**For Windows users**, use the deployment scripts:
-
-```batch
-# Development deployment (optimized for 4 vCPUs, 8GB RAM)
-.\deploy_scaled_system.bat
-
-# Production deployment
-.\deploy_production.bat
-```
-
-**For Linux/Mac users**:
-
-```bash
-# Development
-docker-compose up --build
-
-# Production
-docker-compose -f docker-compose.prod.yaml up --build
-```
-
 ### Development Setup
 
 1. **Clone and navigate to project**:
@@ -66,11 +44,8 @@ docker-compose -f docker-compose.prod.yaml up --build
 2. **Set up environment variables**:
 
     ```bash
-    # Ensure front_end/.env exists with correct values
-    # The .env file should contain:
-    # VITE_MAPBOX_TOKEN=your_mapbox_token
-    # VITE_API_URL=http://localhost:8000
-    # VITE_WS_URL=ws://localhost:8000/ws
+    cp front_end/.env.example front_end/.env
+    # Edit .env file and add your Mapbox token
     ```
 
 3. **Start all services**:
@@ -86,17 +61,7 @@ docker-compose -f docker-compose.prod.yaml up --build
 
 ### Production Deployment
 
-**Windows users**:
-
-```batch
-.\deploy_production.bat
-```
-
-**Linux/Mac users**:
-
-```bash
-docker-compose -f docker-compose.prod.yaml up --build
-```
+Use the production configuration for better monitoring and reliability:
 
 ```bash
 docker-compose -f docker-compose.prod.yaml up --build
@@ -117,31 +82,9 @@ Additional services in production:
     - Validates coordinates (lat/lon within bounds)
     - Filters invalid records (unit must be 'cpm')
     - Enriches with danger levels and timestamps
-    - **Multiple Output Streams**:
-        - `processed-data-output` → Clean, valid data for frontend
-        - `dirty-data` → Invalid/corrupted data for monitoring
-        - `late-data` → Late-arriving data for analysis
+    - Outputs to `processed-data-output` topic
 3. **Real-time API**: FastAPI consumes processed data and broadcasts via WebSocket
 4. **Visualization**: React frontend connects to WebSocket and displays data on interactive map
-
-### Kafka Topics Architecture
-
-| Topic                   | Purpose                        | Consumer                | Priority     |
-| ----------------------- | ------------------------------ | ----------------------- | ------------ |
-| `radiation-data`        | Raw sensor data input          | Flink (source)          | N/A          |
-| `processed-data-output` | Clean, enriched normal data    | Backend → Frontend      | Normal       |
-| `critical-data`         | High-priority/dangerous alerts | Backend → Frontend      | **CRITICAL** |
-| `dirty-data`            | Invalid/corrupted records      | Monitoring systems      | Low          |
-| `late-data`             | Late-arriving measurements     | Data recovery workflows | Low          |
-
-This multi-topic approach ensures:
-
--   **Data Quality**: Clean separation of valid vs invalid data
--   **Priority Handling**: Critical radiation alerts are processed with higher priority
--   **Real-time Alerting**: Dangerous radiation levels trigger immediate notifications
--   **Monitoring**: Track data quality and rejection rates
--   **Auditing**: Complete data lineage and audit trail
--   **Recovery**: Handle late-arriving or missed data
 
 ### Key Components Explained
 
@@ -155,39 +98,9 @@ This multi-topic approach ensures:
 #### Backend WebSocket Server
 
 -   **Connection Management**: Handles multiple concurrent WebSocket connections
--   **Multi-Topic Consumption**: Consumes from both normal and critical data topics
 -   **Error Recovery**: Auto-reconnect logic and connection health monitoring
 -   **Data Broadcasting**: Efficiently sends data to all connected clients
--   **Priority Handling**: Tags critical data for frontend alerting
 -   **Health Endpoint**: `/health` for monitoring system status
-
-#### Critical Data Sink & Alerting
-
-The system implements a dedicated **Critical Data Sink** for high-priority radiation alerts:
-
-**Critical Data Criteria:**
-
--   `dangerous = true` (radiation ≥ 100 CPM)
--   `level = "high"` (radiation ≥ 50 CPM)
-
-**Critical Data Features:**
-
--   **Dedicated Kafka Topic**: `critical-data` with optimized configuration
--   **Fast Delivery**: Smaller batch sizes (16KB) and minimal linger time (5ms)
--   **High Reliability**: More retries (5) and all-replica acknowledgment
--   **Priority Tagging**: Backend tags critical data with `"data_priority": "critical"`
--   **Enhanced Logging**: Critical alerts logged with INFO level for monitoring
--   **Frontend Integration**: Critical data can trigger special UI alerts/notifications
-
-**Configuration (Optimized for Speed):**
-
-```
-batch.size: 16384 (16KB for faster delivery)
-linger.ms: 5 (minimal delay)
-compression.type: snappy (fast compression)
-acks: all (maximum reliability)
-retries: 5 (enhanced fault tolerance)
-```
 
 #### Frontend Real-time Visualization
 
@@ -242,43 +155,13 @@ retries: 5 (enhanced fault tolerance)
 
 ### Environment Variables
 
-The project uses the `.env` file located in the `front_end/` directory for all environment variable configuration.
-
-#### Frontend Environment Variables (`front_end/.env`)
+#### Frontend (.env)
 
 ```env
 VITE_MAPBOX_TOKEN=your_mapbox_token_here
 VITE_API_URL=http://localhost:8000
 VITE_WS_URL=ws://localhost:8000/ws
 ```
-
-**Setup Instructions**:
-
-1. Copy `front_end/.env.example` to `front_end/.env` (if not already present)
-2. Update the Mapbox token with your own token from https://mapbox.com
-3. Both development and production deployments use this single .env file
-
-#### Docker Environment Variable Handling
-
-The system uses **Option A: Direct .env Copy** approach for handling frontend environment variables:
-
-**Build-Time Variables:**
-
--   The frontend `Dockerfile` directly copies the `.env` file during the build process
--   Vite configuration loads and injects environment variables during build
--   Variables prefixed with `VITE_` are embedded into the built application
-
-**Runtime Variables:**
-
--   Docker Compose services use `env_file: ./front_end/.env` for runtime configuration
--   Both development (`docker-compose.yaml`) and production (`docker-compose.prod.yaml`) use the same .env file
--   No duplicate environment variable management required
-
-**Benefits:**
-
--   Single source of truth for all environment variables
--   No need to maintain separate .env files or Docker environment sections
--   Simplified deployment and configuration management
 
 #### Backend (config.ini)
 
@@ -384,38 +267,6 @@ docker-compose up frontend --build
 # Check service health
 curl http://localhost:8000/health
 ```
-
-### Service Dependencies & Orchestration
-
-The system uses Docker Compose service dependencies to ensure proper startup order:
-
-**Dependency Chain:**
-
-```
-Kafka (with health check)
-  ↓
-┌─── Data Provider (waits for kafka healthy)
-├─── Flink JobManager (waits for kafka healthy)
-└─── Flink Processor (waits for kafka healthy + jobmanager started)
-         ↓
-    TaskManagers (wait for jobmanager started)
-         ↓
-    Backend (waits for jobmanager started)
-```
-
-**Benefits:**
-
--   ✅ **No Manual Waits**: Deployment scripts don't need `timeout` commands
--   ✅ **Automatic Retry**: Services auto-restart if dependencies fail
--   ✅ **Health Checks**: Kafka health check ensures it's ready before dependents start
--   ✅ **Parallel Startup**: Independent services start in parallel where possible
--   ✅ **Graceful Shutdown**: `docker-compose down` stops services in reverse dependency order
-
-**Health Check Configuration:**
-
--   Kafka includes `nc -z localhost 9092` health check
--   Services use `condition: service_healthy` for Kafka
--   Services use `condition: service_started` for other dependencies
 
 ## License
 

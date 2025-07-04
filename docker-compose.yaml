@@ -4,13 +4,10 @@ services:
     build:
       context: ./front_end
       dockerfile: Dockerfile
-      args:
-        VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN}
-        VITE_API_URL:      ${VITE_API_URL}
     ports:
       - "3000:80"
-    environment:
-      - VITE_API_URL=${VITE_API_URL}
+    env_file:
+      - ./front_end/.env
     deploy:
       resources:
         limits:
@@ -37,7 +34,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 4  # Matches total TaskManager slots for optimal parallelism
+      KAFKA_NUM_PARTITIONS: 8  # Matches total TaskManager slots for optimal parallelism
       KAFKA_LOG_RETENTION_HOURS: 24  # Retain logs for 24 hours
       KAFKA_LOG_SEGMENT_BYTES: 1073741824  # 1GB log segments
       KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 10000  # Flush every 10k messages
@@ -118,11 +115,11 @@ services:
         condition: service_started
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=2
-      - TASK_MANAGER_MEMORY_PROCESS_SIZE=1536m
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
+      - TASK_MANAGER_MEMORY_PROCESS_SIZE=2048m
       - TASK_MANAGER_MEMORY_FRAMEWORK_HEAP_SIZE=128m
-      - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1024m
-      - TASK_MANAGER_MEMORY_MANAGED_SIZE=256m
+      - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1536m
+      - TASK_MANAGER_MEMORY_MANAGED_SIZE=384m
     command: taskmanager
     deploy:
       resources:
@@ -143,11 +140,11 @@ services:
         condition: service_started
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=2
-      - TASK_MANAGER_MEMORY_PROCESS_SIZE=1536m
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
+      - TASK_MANAGER_MEMORY_PROCESS_SIZE=2048m
       - TASK_MANAGER_MEMORY_FRAMEWORK_HEAP_SIZE=128m
-      - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1024m
-      - TASK_MANAGER_MEMORY_MANAGED_SIZE=256m
+      - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1536m
+      - TASK_MANAGER_MEMORY_MANAGED_SIZE=384m
     command: taskmanager
     deploy:
       resources:
