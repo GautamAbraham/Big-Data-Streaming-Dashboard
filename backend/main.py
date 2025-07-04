@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 config = configparser.ConfigParser()
 config.read(os.getenv("CONFIG_FILE", "config.ini"))
 KAFKA_TOPIC = config['DEFAULT'].get('KAFKA_TOPIC', 'processed-data-output')
+KAFKA_CRITICAL_TOPIC = config['DEFAULT'].get('KAFKA_CRITICAL_TOPIC', 'critical-data')
 KAFKA_BOOTSTRAP_SERVERS = config['DEFAULT'].get('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
 
 app = FastAPI()
@@ -57,15 +58,17 @@ async def broadcast_to_clients(message: str):
     clients.difference_update(disconnected_clients)
 
 async def kafka_to_websocket():
-    """Enhanced Kafka consumer with better error handling and reconnection."""
+    """Enhanced Kafka consumer with better error handling and reconnection for both normal and critical data."""
     retry_count = 0
     max_retries = 5
     
     while retry_count < max_retries:
         consumer = None
         try:
+            # Subscribe to both normal and critical data topics
             consumer = AIOKafkaConsumer(
                 KAFKA_TOPIC,
+                KAFKA_CRITICAL_TOPIC,
                 bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
                 value_deserializer=lambda m: m.decode("utf-8"),
                 group_id="websocket-backend",
@@ -75,7 +78,7 @@ async def kafka_to_websocket():
             )
             
             await consumer.start()
-            logger.info(f"Kafka consumer started for topic: {KAFKA_TOPIC}")
+            logger.info(f"Kafka consumer started for topics: {KAFKA_TOPIC}, {KAFKA_CRITICAL_TOPIC}")
             retry_count = 0  # Reset retry count on successful connection
             
             last_heartbeat = asyncio.get_event_loop().time()
@@ -83,11 +86,24 @@ async def kafka_to_websocket():
             async for msg in consumer:
                 try:
                     data = msg.value
-                    # Validate JSON
-                    json.loads(data)  # This will raise an exception if invalid JSON
+                    topic = msg.topic
                     
-                    logger.debug(f"Broadcasting message to {len(clients)} clients")
-                    await broadcast_to_clients(data)
+                    # Validate JSON
+                    parsed_data = json.loads(data)  # This will raise an exception if invalid JSON
+                    
+                    # Add topic metadata to help frontend distinguish critical vs normal data
+                    if topic == KAFKA_CRITICAL_TOPIC:
+                        parsed_data["data_priority"] = "critical"
+                        parsed_data["source_topic"] = "critical-data"
+                        logger.info(f"CRITICAL DATA: Broadcasting critical alert to {len(clients)} clients")
+                    else:
+                        parsed_data["data_priority"] = "normal"
+                        parsed_data["source_topic"] = "processed-data-output"
+                        logger.debug(f"Broadcasting normal data to {len(clients)} clients")
+                    
+                    # Re-serialize with added metadata
+                    enriched_data = json.dumps(parsed_data)
+                    await broadcast_to_clients(enriched_data)
                     last_heartbeat = asyncio.get_event_loop().time()
                     
                 except json.JSONDecodeError:
@@ -128,5 +144,8 @@ async def health_check():
     return {
         "status": "healthy",
         "connected_clients": len(clients),
-        "kafka_topic": KAFKA_TOPIC
+        "kafka_topics": {
+            "normal_data": KAFKA_TOPIC,
+            "critical_data": KAFKA_CRITICAL_TOPIC
+        }
     }
