@@ -1,4 +1,5 @@
 import { Popup } from "react-map-gl";
+import { memo } from "react";
 
 function InfoPopup({ latitude, longitude, cpm, setSelectedPoint }) {
   let lat, lon;
@@ -46,4 +47,4 @@ function InfoPopup({ latitude, longitude, cpm, setSelectedPoint }) {
   );
 }
 
-export default InfoPopup;
+export default memo(InfoPopup);
