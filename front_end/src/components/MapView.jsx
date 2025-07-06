@@ -25,7 +25,7 @@ export default function MapView({ userLocation, setUserLocation, threshold, play
   
   // state to track clicked point on the map
   const [selectedPoint, setSelectedPoint] = useState(null);
-
+console.log("########selectedPoint ", selectedPoint);
   // color mapping for radiation levels
   const circleColor = useMemo(() => getCircleColor(), []);
   const circleRadius = useMemo(() => getCircleRadius(), []);
@@ -93,7 +93,7 @@ export default function MapView({ userLocation, setUserLocation, threshold, play
 
   // Use custom WebSocket hook
   useWebSocket({
-    wsUrl: import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws",
+    wsUrl: import.meta.env.VITE_WS_URL,
     playbackSpeed,
     threshold,
     onDataPoints: handleDataPoints,
@@ -170,6 +170,7 @@ export default function MapView({ userLocation, setUserLocation, threshold, play
 
         {selectedPoint && (
           <InfoPopup
+            timestamp={selectedPoint.properties.timestamp}
             latitude={selectedPoint.geometry.coordinates[1]}
             longitude={selectedPoint.geometry.coordinates[0]}
             cpm={selectedPoint.properties.value}

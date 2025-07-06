@@ -1,7 +1,7 @@
 import { Popup } from "react-map-gl";
 import { memo } from "react";
 
-function InfoPopup({ latitude, longitude, cpm, setSelectedPoint }) {
+function InfoPopup({ timestamp,latitude, longitude, cpm, setSelectedPoint }) {
   let lat, lon;
 
   if (Array.isArray(latitude)) {
@@ -16,6 +16,18 @@ function InfoPopup({ latitude, longitude, cpm, setSelectedPoint }) {
     lat = latitude;
     lon = longitude;
   }
+
+  // Format timestamp to a user-friendly format
+  const formattedTimestamp = timestamp
+    ? new Date(timestamp).toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "--";
 
   return (
     <Popup
@@ -40,6 +52,12 @@ function InfoPopup({ latitude, longitude, cpm, setSelectedPoint }) {
           {"Lon: "}
           <span className="font-mono text-gray-700">
             {typeof lon === "number" ? lon.toFixed(5) : "--"}
+          </span>
+        </div>
+         <div className="text-gray-500">
+          {"Timestamp: "}
+          <span className="font-mono text-gray-700">
+            {formattedTimestamp}
           </span>
         </div>
       </div>
