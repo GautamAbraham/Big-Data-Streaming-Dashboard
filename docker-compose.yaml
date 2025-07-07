@@ -11,11 +11,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.2'
-          memory: 256M
+          cpus: '0.5'
+          memory: 512M
         reservations:
-          cpus: '0.1'
-          memory: 128M
+          cpus: '0.25'
+          memory: 256M
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -51,10 +51,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
+          cpus: '1.0'
           memory: 1024M
         reservations:
-          cpus: '0.3'
+          cpus: '0.5'
           memory: 512M
 
   data-provider:
@@ -73,10 +73,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.2'
+          cpus: '0.5'
           memory: 256M
         reservations:
-          cpus: '0.1'
+          cpus: '0.25'
           memory: 128M
 
   flink-jobmanager:
@@ -88,10 +88,16 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - JOB_MANAGER_MEMORY_PROCESS_SIZE=1536m
-      - JOB_MANAGER_MEMORY_JVM_HEAP_SIZE=1024m
-      - JOB_MANAGER_MEMORY_JVM_METASPACE_SIZE=256m
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        jobmanager.memory.process.size: 1600m
+        taskmanager.memory.process.size: 3072m
+        execution.checkpointing.interval: 1min
+        state.backend.incremental: true
+        taskmanager.memory.managed.fraction: 0.5
+        state.backend.type: rocksdb
     command: jobmanager
     depends_on:
       kafka:
@@ -99,11 +105,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1536M
+          cpus: '1.5'
+          memory: "1.5g"
         reservations:
-          cpus: '0.5'
-          memory: 1024M
+          cpus: '1.0'
+          memory: 768M
 
   flink-taskmanager-1:
     build:
@@ -114,46 +120,51 @@ services:
       flink-jobmanager:
         condition: service_started
     environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
-      - TASK_MANAGER_MEMORY_PROCESS_SIZE=2048m
-      - TASK_MANAGER_MEMORY_FRAMEWORK_HEAP_SIZE=128m
-      - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1536m
-      - TASK_MANAGER_MEMORY_MANAGED_SIZE=384m
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        jobmanager.memory.process.size: 1600m
+        taskmanager.memory.process.size: 3072m
+        execution.checkpointing.enabled: true
+        execution.checkpointing.interval: 1min
+        state.backend.incremental: true
+        state.backend.type: rocksdb
+        taskmanager.memory.managed.fraction: 0.5
     command: taskmanager
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 1536M
+          cpus: '2.5'
+          memory: 3g
         reservations:
-          cpus: '1.5'
-          memory: 1024M
+          cpus: '2.0'
+          memory: 1g
 
-  flink-taskmanager-2:
-    build:
-      context: ./flink_process
-      dockerfile: Dockerfile
-    container_name: flink-taskmanager-2
-    depends_on:
-      flink-jobmanager:
-        condition: service_started
-    environment:
-      - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
-      - TASK_MANAGER_MEMORY_PROCESS_SIZE=2048m
-      - TASK_MANAGER_MEMORY_FRAMEWORK_HEAP_SIZE=128m
-      - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1536m
-      - TASK_MANAGER_MEMORY_MANAGED_SIZE=384m
-    command: taskmanager
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 1536M
-        reservations:
-          cpus: '1.5'
-          memory: 1024M
+  # flink-taskmanager-2:
+  #   build:
+  #     context: ./flink_process
+  #     dockerfile: Dockerfile
+  #   container_name: flink-taskmanager-2
+  #   depends_on:
+  #     flink-jobmanager:
+  #       condition: service_started
+  #   environment:
+  #     - JOB_MANAGER_RPC_ADDRESS=jobmanager
+  #     - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
+  #     - TASK_MANAGER_MEMORY_PROCESS_SIZE=2048m
+  #     - TASK_MANAGER_MEMORY_FRAMEWORK_HEAP_SIZE=128m
+  #     - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1536m
+  #     - TASK_MANAGER_MEMORY_MANAGED_SIZE=384m
+  #   command: taskmanager
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '2.5'
+  #         memory: 1024M
+  #       reservations:
+  #         cpus: '2.0'
+  #         memory: 768M
 
   flink-processor:
     build:
@@ -181,10 +192,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.3'
+          cpus: '1.0'
           memory: 512M
         reservations:
-          cpus: '0.2'
+          cpus: '0.5'
           memory: 256M
 volumes:
   kafka_data:
