@@ -74,16 +74,10 @@ class DataValidator(MapFunction):
                 if str(data["unit"]).lower() != "cpm":
                     return self._create_error_response(f"Invalid unit: {data['unit']}", value)
                 
-                # Timestamp check and validation
+                # Timestamp existence check only - let watermarking handle format validation
                 timestamp = data.get("captured_time")
                 if not timestamp:
                     return self._create_error_response("Missing timestamp", value)
-                
-                # Validate timestamp format
-                try:
-                    datetime.strptime(str(timestamp), '%Y-%m-%d %H:%M:%S')
-                except ValueError:
-                    return self._create_error_response(f"Invalid timestamp format: {timestamp} (expected YYYY-MM-DD HH:MM:SS)", value)
                 
                 # Return validated data (keep val as float, don't convert to int here)
                 valid_data = {
@@ -170,7 +164,7 @@ class DataEnricher(MapFunction):
 
 def extract_timestamp(json_str: str) -> int:
     """
-    Extract timestamp from validated JSON data.
+    Extract timestamp from validated JSON data with flexible format handling.
     If parsing fails, return -1 to signal dirty data.
     """
     try:
@@ -178,17 +172,33 @@ def extract_timestamp(json_str: str) -> int:
         if data.get("is_valid", False):
             timestamp_str = data["data"]["timestamp"]
             try:
-                dt = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+                # Handle multiple timestamp formats
+                clean_timestamp = str(timestamp_str)
+                
+                # Remove timezone info (+00:00, Z)
+                if '+' in clean_timestamp:
+                    clean_timestamp = clean_timestamp.split('+')[0]
+                elif 'Z' in clean_timestamp:
+                    clean_timestamp = clean_timestamp.replace('Z', '')
+                
+                # Remove microseconds (.571000)
+                if '.' in clean_timestamp:
+                    clean_timestamp = clean_timestamp.split('.')[0]
+                
+                # Parse the cleaned timestamp
+                dt = datetime.strptime(clean_timestamp, '%Y-%m-%d %H:%M:%S')
                 return int(dt.timestamp() * 1000)
-            except Exception:
+                
+            except Exception as e:
                 # Parsing failed, signal dirty data
-                logging.warning(f"Failed to parse timestamp: {timestamp_str}")
+                logging.warning(f"Failed to parse timestamp: {timestamp_str}, error: {e}")
                 return -1
         else:
             # Invalid data, signal dirty data
             return -1
-    except Exception:
+    except Exception as e:
         # Any error, signal dirty data
+        logging.error(f"JSON parsing failed in extract_timestamp: {e}")
         return -1
 
 
