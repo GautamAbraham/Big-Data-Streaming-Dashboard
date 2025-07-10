@@ -15,17 +15,17 @@ const Legend = ({ userLocation }) => {
 
         <div className="flex items-center gap-1.5 text-green-700 text-sm font-medium">
           <span className="inline-block w-3 h-3 bg-green-500 rounded-full border border-green-300 shadow-sm" />
-          {"Low (< 20 CPM)"}
+          {"Low (< 50 CPM)"}
         </div>
 
         <div className="flex items-center gap-1.5 text-yellow-700 text-sm font-medium">
           <span className="inline-block w-3 h-3 bg-yellow-400 rounded-full border border-yellow-300 shadow-sm" />
-          {"Medium (20 - 60 CPM)"}
+          {"Medium (50 - 200 CPM)"}
         </div>
 
         <div className="flex items-center gap-1.5 text-red-700 text-sm font-medium">
           <span className="inline-block w-3 h-3 bg-red-500 rounded-full border border-red-300 shadow-sm" />
-          {"High (> 60 CPM)"}
+          {"High (> 200 CPM)"}
         </div>
       </div>
     </div>

@@ -82,19 +82,19 @@ export default function Dashboard({ children }) {
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#22c55e', marginRight: 8 }}></div>
-            Low (10-20 CPM)
+            Low (10-50 CPM)
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#eab308', marginRight: 8 }}></div>
-            Moderate (20-50 CPM)
+            Moderate (50-200 CPM)
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ea580c', marginRight: 8 }}></div>
-            High (50-100 CPM)
+            High (200-1000 CPM)
           </div>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#dc2626', marginRight: 8 }}></div>
-            Very High (&gt;100 CPM)
+            Very High (&gt;1000 CPM)
           </div>
         </div>
       </div>

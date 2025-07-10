@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import time
 import logging
 import configparser
 import pandas as pd
@@ -55,7 +54,7 @@ def send_data_from_csv(producer: KafkaProducer, topic: str, csv_file_path: str, 
             producer.send(topic, value=data)
             logging.info(f"Sent data to kafka: {data}")
 
-            time.sleep(0.00001)
+            time.sleep(0.01)
 
     producer.flush()
     logging.info("Finished sending all data.")
