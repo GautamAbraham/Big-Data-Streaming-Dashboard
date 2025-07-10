@@ -262,7 +262,7 @@ def main():
     try:
         kafka_topic = config['DEFAULT']['KAFKA_TOPIC']
         kafka_bootstrap_servers = config['DEFAULT']['KAFKA_BOOTSTRAP_SERVERS']
-        kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'flink-processed-output')
+        kafka_output_topic = config['DEFAULT'].get('KAFKA_OUTPUT_TOPIC', 'normal-data')
         kafka_dirty_topic = config['DEFAULT'].get('KAFKA_DIRTY_TOPIC', 'dirty-data')
         kafka_critical_topic = config['DEFAULT'].get('KAFKA_CRITICAL_TOPIC', 'critical-data')
         
@@ -387,8 +387,8 @@ def main():
                   .name("Dirty Data Sink")
 
     # --- Debug output ---
-    # normal_stream.print().set_parallelism(1).name("Normal Data Debug Print")
-    # critical_stream.print().set_parallelism(1).name("Critical Data Debug Print")
+    normal_stream.print().set_parallelism(1).name("Normal Data Debug Print")
+    critical_stream.print().set_parallelism(1).name("Critical Data Debug Print")
 
     env.execute("Simple Radiation Monitoring")
 

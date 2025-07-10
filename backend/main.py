@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Load config
 config = configparser.ConfigParser()
 config.read(os.getenv("CONFIG_FILE", "config.ini"))
-KAFKA_TOPIC = config['DEFAULT'].get('KAFKA_TOPIC', 'processed-data-output')
+KAFKA_TOPIC = config['DEFAULT'].get('KAFKA_TOPIC', 'normal-data')
 KAFKA_CRITICAL_TOPIC = config['DEFAULT'].get('KAFKA_CRITICAL_TOPIC', 'critical-data')
 KAFKA_BOOTSTRAP_SERVERS = config['DEFAULT'].get('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
 
