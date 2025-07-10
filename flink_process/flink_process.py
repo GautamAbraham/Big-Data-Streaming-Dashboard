@@ -159,7 +159,7 @@ class DataEnricher(MapFunction):
             return json.dumps(enriched)
             
         except Exception as e:
-            print(f"Error in DataEnricher: {e}")
+            logging.error(f"Error in DataEnricher: {e}")
             return None
 
 def extract_timestamp(json_str: str) -> int:
@@ -332,8 +332,6 @@ def main():
     invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False)) \
                                      .set_parallelism(validation_parallelism) \
                                      .name("Invalid Data Filter")
-                                     .set_parallelism(validation_parallelism) \
-                                     .name("Invalid Data Filter")
 
     # --- WATERMARKING STRATEGY ---
     # Apply watermarking to valid data for event-time processing
@@ -357,14 +355,21 @@ def main():
                                .name("Data Enrichment")
 
     # Split enriched stream into critical and normal data
-    critical_stream = enriched_stream.filter(lambda x: json.loads(x).get("dangerous", False) or json.loads(x).get("level") == "high") \
+    # Helper function to avoid multiple JSON parses
+    def is_dangerous(json_str):
+        try:
+            data = json.loads(json_str)
+            return data.get("dangerous", False)
+        except:
+            return False
+    
+    critical_stream = enriched_stream.filter(is_dangerous) \
                                     .set_parallelism(enrichment_parallelism) \
                                     .name("Critical Data Filter")
     
-    normal_stream = enriched_stream.filter(lambda x: not (json.loads(x).get("dangerous", False) or json.loads(x).get("level") == "high")) \
+    normal_stream = enriched_stream.filter(lambda x: not is_dangerous(x)) \
                                   .set_parallelism(enrichment_parallelism) \
                                   .name("Normal Data Filter")
-
     # --- Output Sinks ---
     # Output normal processed data to main topic
     processed_producer = FlinkKafkaProducer(
@@ -396,8 +401,6 @@ def main():
     # Route all dirty data (validation failures) to dirty data sink
     # Note: Since we validate timestamps in DataValidator, most dirty data is caught there
     invalid_stream.add_sink(dirty_producer) \
-                  .set_parallelism(sink_parallelism) \
-                  .name("Dirty Data Sink")
                   .set_parallelism(sink_parallelism) \
                   .name("Dirty Data Sink")
 
