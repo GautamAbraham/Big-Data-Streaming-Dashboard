@@ -287,9 +287,9 @@ def main():
         env.set_parallelism(global_parallelism)
         
         # Radiation Level Thresholds
-        danger_threshold = config['DEFAULT'].getfloat('DANGER_THRESHOLD', 100.0)
-        low_threshold = config['DEFAULT'].getint('LOW_THRESHOLD', 20)
-        moderate_threshold = config['DEFAULT'].getint('MODERATE_THRESHOLD', 50)
+        danger_threshold = config['DEFAULT'].getfloat('DANGER_THRESHOLD', 1000.0)
+        low_threshold = config['DEFAULT'].getint('LOW_THRESHOLD', 50)
+        moderate_threshold = config['DEFAULT'].getint('MODERATE_THRESHOLD', 200)
         
         # Watermarking Configuration
         max_out_of_orderness = config['DEFAULT'].getint('MAX_OUT_OF_ORDERNESS_SECONDS', 20)

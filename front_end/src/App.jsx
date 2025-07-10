@@ -11,7 +11,7 @@ function App() {
   const [userLocation, setUserLocation] = useState(null);
 
   // configuration states
-  const [threshold, setThreshold] = useState(500);
+  const [threshold, setThreshold] = useState(1000);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [filterLevel, setFilterLevel] = useState("all");
 
