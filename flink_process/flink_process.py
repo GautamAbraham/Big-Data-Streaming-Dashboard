@@ -249,12 +249,16 @@ class EnhancedDataEnricher(MapFunction):
             if not validation_result.get("is_valid", False):
                 return None
                 
-            data = validation_result["data"]
-            
-            # NOW do the heavy validation that was moved from DataValidator
-            lat = data["lat"]
-            lon = data["lon"]
-            val = data["value"]
+            data = validation_result.get("data", {})
+            lat = data.get("lat")
+            lon = data.get("lon")
+            val = data.get("value")
+            if lat is None or lon is None or val is None:
+                return json.dumps({
+                    "is_valid": False,
+                    "error": f"Missing lat/lon/value in data: {data}",
+                    "raw_data": value
+                })
             
             # Range validation (moved from validator for better performance distribution)
             if not (-90 <= lat <= 90) or not (-180 <= lon <= 180) or val <= 0:

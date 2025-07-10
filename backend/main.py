@@ -7,6 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 import logging
 from typing import Set
+from pydantic import BaseModel
+from kafka import KafkaProducer
+import atexit
+from fastapi import Body
+import traceback
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +24,15 @@ KAFKA_TOPIC = config['DEFAULT'].get('KAFKA_TOPIC', 'processed-data-output')
 KAFKA_CRITICAL_TOPIC = config['DEFAULT'].get('KAFKA_CRITICAL_TOPIC', 'critical-data')
 KAFKA_BOOTSTRAP_SERVERS = config['DEFAULT'].get('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
 
+CONFIG_TOPIC = config['DEFAULT'].get('CONFIG_TOPIC', 'playback-config')   # <-- Add this if not present
+
+producer_config = {
+    "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
+    "value_serializer": lambda v: json.dumps(v).encode('utf-8'),
+}
+config_producer = KafkaProducer(**producer_config)
+atexit.register(lambda: config_producer.close())
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +42,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 clients: Set[WebSocket] = set()
+playback_speed = 1.0
+
+class PlaybackSpeedRequest(BaseModel):
+    playback_speed: float
+
+@app.post("/api/playback_speed")
+async def set_playback_speed(speed_req: PlaybackSpeedRequest):
+    global playback_speed
+    playback_speed = speed_req.playback_speed
+    config_producer.send(CONFIG_TOPIC, {"playback_speed": float(playback_speed)})
+    config_producer.flush()
+    logger.info(f"[BACKEND] Set playback speed to {playback_speed} (sent to {CONFIG_TOPIC})")
+    return {"playback_speed": playback_speed}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -51,7 +78,7 @@ async def broadcast_to_clients(message: str):
         try:
             await ws.send_text(message)
         except Exception as e:
-            logger.warning(f"Failed to send to client: {e}")
+            logger.warning(f"Failed to send to client: {e}\n{traceback.format_exc()}")
             disconnected_clients.add(ws)
     
     # Remove disconnected clients
@@ -103,6 +130,7 @@ async def kafka_to_websocket():
                     
                     # Re-serialize with added metadata
                     enriched_data = json.dumps(parsed_data)
+                    logger.info(f"SENDING TO WS CLIENTS: {enriched_data}")
                     await broadcast_to_clients(enriched_data)
                     last_heartbeat = asyncio.get_event_loop().time()
                     

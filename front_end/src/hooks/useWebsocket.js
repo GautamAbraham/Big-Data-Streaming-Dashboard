@@ -30,6 +30,7 @@ export function useWebSocket({ wsUrl, playbackSpeed, threshold, onDataPoints, on
     };
 
     ws.onmessage = ({ data }) => {
+      console.log("WebSocket raw message:", event.data);
       try {
         const msg = JSON.parse(data);
         if (msg.type === 'heartbeat') return;
