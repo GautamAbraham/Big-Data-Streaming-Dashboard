@@ -1,5 +1,6 @@
 services:
   # Frontend with production build and resource limits
+  # Started after all data pipeline components are healthy
   frontend:
     build:
       context: ./front_end
@@ -10,7 +11,18 @@ services:
       - ./front_end/.env
     restart: unless-stopped
     depends_on:
-      - backend
+      kafka:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      jobmanager:
+        condition: service_healthy
+      taskmanager:
+        condition: service_started
+      flink_process:
+        condition: service_started
+      data_provider:
+        condition: service_started
     deploy:
       resources:
         limits:
@@ -153,6 +165,12 @@ services:
     volumes:
       - ./flink_process/config.ini:/app/config.ini:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # Data provider with health checks
   data_provider:
@@ -166,6 +184,12 @@ services:
       - ./data_provider/config.ini:/app/config.ini:ro
       - ./data_provider/safecast_data:/app/safecast_data:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Prometheus for metrics collection (optional)
   prometheus:

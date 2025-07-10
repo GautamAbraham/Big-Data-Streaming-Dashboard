@@ -99,6 +99,8 @@ def send_data_from_csv(
             producer.send(topic, value=data)
             logging.info(f"Sent data to kafka: {data}")
 
+            time.sleep(0.01)
+
     producer.flush()
     logging.info("Finished sending all data.")
 
