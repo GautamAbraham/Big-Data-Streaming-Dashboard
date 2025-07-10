@@ -321,7 +321,8 @@ def main():
     # Validation operator
     validated_stream = ds.map(DataValidator(), output_type=Types.STRING()) \
                         .set_parallelism(validation_parallelism) \
-                        .name("Data Validation")
+                        .name("Optimized Data Validation") \
+                        .rebalance()  # Add rebalancing for better load distribution
 
     # Split stream into valid and invalid data
     valid_stream = validated_stream.filter(lambda x: json.loads(x).get("is_valid", False)) \
@@ -329,6 +330,8 @@ def main():
                                    .name("Valid Data Filter")
     
     invalid_stream = validated_stream.filter(lambda x: not json.loads(x).get("is_valid", False)) \
+                                     .set_parallelism(validation_parallelism) \
+                                     .name("Invalid Data Filter")
                                      .set_parallelism(validation_parallelism) \
                                      .name("Invalid Data Filter")
 
@@ -393,6 +396,8 @@ def main():
     # Route all dirty data (validation failures) to dirty data sink
     # Note: Since we validate timestamps in DataValidator, most dirty data is caught there
     invalid_stream.add_sink(dirty_producer) \
+                  .set_parallelism(sink_parallelism) \
+                  .name("Dirty Data Sink")
                   .set_parallelism(sink_parallelism) \
                   .name("Dirty Data Sink")
 
