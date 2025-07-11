@@ -184,31 +184,6 @@ services:
           cpus: '1.5'
           memory: 2048M
 
-  # flink-taskmanager-2:
-  #   build:
-  #     context: ./flink_process
-  #     dockerfile: Dockerfile
-  #   container_name: flink-taskmanager-2
-  #   depends_on:
-  #     flink-jobmanager:
-  #       condition: service_started
-  #   environment:
-  #     - JOB_MANAGER_RPC_ADDRESS=jobmanager
-  #     - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=4
-  #     - TASK_MANAGER_MEMORY_PROCESS_SIZE=2048m
-  #     - TASK_MANAGER_MEMORY_FRAMEWORK_HEAP_SIZE=128m
-  #     - TASK_MANAGER_MEMORY_TASK_HEAP_SIZE=1536m
-  #     - TASK_MANAGER_MEMORY_MANAGED_SIZE=384m
-  #   command: taskmanager
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         cpus: '2.5'
-  #         memory: 1024M
-  #       reservations:
-  #         cpus: '2.0'
-  #         memory: 768M
-
   flink-processor:
     build:
       context: ./flink_process
