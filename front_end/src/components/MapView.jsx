@@ -170,13 +170,17 @@ export default function MapView({
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
         interactiveLayerIds={["clusters", "radiation-points"]}
       >
-        <Source
+       <Source
           id="radiation"
           type="geojson"
           data={filteredGeojson}
           cluster={true}
-          clusterMaxZoom={14}
+          clusterMaxZoom={7}
           clusterRadius={50}
+          clusterProperties={{
+            // max_cpm will be the highest CPM value among points in the cluster
+            max_cpm: ["max", ["get", "value"]]
+          }}
         >
           {/* --- Clustered circles --- */}
           <Layer
@@ -184,7 +188,15 @@ export default function MapView({
             type="circle"
             filter={["has", "point_count"]}
             paint={{
-              "circle-color": "#36a2eb",
+              // Color clusters by max CPM (severity)
+              "circle-color": [
+                "step",
+                ["get", "max_cpm"],
+                "#22c55e",   // < 20 CPM (green)
+                50, "#ea580c", // 50-100 CPM (orange)
+                200, "#dc2626", // >100 CPM (red)
+                1000, "#7f1d1d" // >1000 CPM (dark red, critical)
+              ],
               "circle-radius": [
                 "step",
                 ["get", "point_count"],
@@ -212,11 +224,31 @@ export default function MapView({
             type="circle"
             filter={["!", ["has", "point_count"]]}
             paint={{
-              "circle-radius": circleRadius,
+              "circle-radius": [
+                "match",
+                ["get", "level"],
+                "low", 7,
+                "moderate", 10,
+                "high", 16,
+                6
+              ],
               "circle-color": circleColor,
               "circle-opacity": 0.8,
-              "circle-stroke-width": 1,
-              "circle-stroke-color": "#ffffff",
+              "circle-stroke-width": [
+                "case",
+                ["==", ["get", "level"], "high"], 3,
+                1
+              ],
+              "circle-stroke-color": [
+                "case",
+                ["==", ["get", "level"], "high"], "#fff",
+                "#222"
+              ],
+              "circle-blur": [
+                "case",
+                ["==", ["get", "level"], "high"], 0.5,
+                0
+              ]
             }}
           />
         </Source>
