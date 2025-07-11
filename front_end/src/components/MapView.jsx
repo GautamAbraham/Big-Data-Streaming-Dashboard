@@ -76,7 +76,7 @@ export default function MapView({
       properties: {
         ...d,
         level: getLevelFromValue(d.value),
-        timestamp: new Date().toISOString(),
+        timestamp: d.timestamp,
       },
     }));
 
