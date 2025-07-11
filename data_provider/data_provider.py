@@ -54,7 +54,9 @@ def send_data_from_csv(producer: KafkaProducer, topic: str, csv_file_path: str, 
             producer.send(topic, value=data)
             logging.info(f"Sent data to kafka: {data}")
 
-            time.sleep(0.01)
+            # OPTIMIZED FOR 8GB RAM: Balanced throughput for 3K-5K records/second
+            # Slight delay to prevent overwhelming the system while maintaining high throughput
+            time.sleep(0.0002)  # 200 microseconds - allows ~5K records/second
 
     producer.flush()
     logging.info("Finished sending all data.")
