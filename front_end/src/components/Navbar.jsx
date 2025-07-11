@@ -51,7 +51,6 @@ function Navbar({ toggleSidebar, connectionStatus, dataStats }) {
     );
   }
 
-  // Format the date in a human-friendly way
   function getFormattedTime() {
     if (!dataStats?.lastUpdate) return "--";
     const date = new Date(dataStats.lastUpdate);
@@ -77,12 +76,10 @@ function Navbar({ toggleSidebar, connectionStatus, dataStats }) {
         </button>
       </div>
 
-      {/* Center - Data stats (hidden on mobile) */}
       <div className="flex-1 flex justify-center">
         {getDataStats()}
       </div>
 
-      {/* Right side - Connection status and last update */}
       <div className="flex items-center gap-4">
         {getConnectionStatus()}
         <div className="hidden md:block text-xs text-gray-600">
