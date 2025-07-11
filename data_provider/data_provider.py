@@ -3,12 +3,16 @@ import time
 import json
 import logging
 import configparser
-import pandas as pd
-from kafka import KafkaProducer
+from kafka import KafkaProducer, KafkaConsumer
 from kafka.errors import NoBrokersAvailable
+import pandas as pd
+import threading
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# --- GLOBAL for playback speed ---
+playback_speed = 1.0
 
 def load_config(config_path: str = "config.ini") -> configparser.ConfigParser:
     config = configparser.ConfigParser()
@@ -60,6 +64,24 @@ def create_kafka_producer(bootstrap_servers, config):
             logging.error(f"Error creating Kafka producer: {e}. Retrying in 5 seconds...")
             time.sleep(5)
 
+def listen_for_speed(bootstrap_servers, config_topic):
+    global playback_speed
+    consumer = KafkaConsumer(
+        config_topic,
+        bootstrap_servers=bootstrap_servers,
+        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        auto_offset_reset='latest',
+        group_id='speed-listener-group'
+    )
+    logging.info("Started playback speed config listener...")
+    for msg in consumer:
+        try:
+            val = msg.value
+            if "playback_speed" in val:
+                playback_speed = float(val["playback_speed"])
+                logging.info(f"Received NEW playback speed: {playback_speed}")
+        except Exception as e:
+            logging.warning(f"Error parsing playback speed: {e}")
 
 def send_data_from_csv(producer: KafkaProducer, topic: str, csv_file_path: str, chunk_size: int = 10000, delay_ms: int = 10):
     """
