@@ -71,26 +71,26 @@ services:
           cpus: '1.0'
           memory: 896M
 
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-    environment:
-      DYNAMIC_CONFIG_ENABLED: 'true'
-      KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
+  # kafka-ui:
+  #   image: provectuslabs/kafka-ui:latest
+  #   container_name: kafka-ui
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     DYNAMIC_CONFIG_ENABLED: 'true'
+  #     KAFKA_CLUSTERS_0_NAME: local
+  #     KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.5'
+  #         memory: 512M
+  #       reservations:
+  #         cpus: '0.25'
+  #         memory: 256M
 
   data-provider:
     build:
@@ -138,7 +138,8 @@ services:
         execution.checkpointing.interval: 2min
         state.backend.incremental: true
         taskmanager.memory.managed.fraction: 0.4
-        state.backend.type: rocksdb
+        state.backend: rocksdb
+        execution.runtime-mode: streaming
     command: jobmanager
     depends_on:
       kafka:
@@ -170,8 +171,9 @@ services:
         execution.checkpointing.enabled: true
         execution.checkpointing.interval: 2min
         state.backend.incremental: true
-        state.backend.type: rocksdb
+        state.backend: rocksdb
         taskmanager.memory.managed.fraction: 0.4
+        execution.runtime-mode: streaming
     command: taskmanager
     deploy:
       resources:

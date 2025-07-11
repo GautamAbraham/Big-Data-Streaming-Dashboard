@@ -92,7 +92,9 @@ export default function MapView({
     const alertPoints = points.filter(d => d.value >= thresholdRef.current);
     alertPoints.forEach(({ value, lat, lon }) => {
       const severity = value >= thresholdRef.current * 2 ? 'critical' : 'warning';
-      onAlert?.(`CPM ${value} at [${lat?.toFixed(2)}, ${lon?.toFixed(2)}]`, severity, { lat, lon });
+      const latStr = typeof lat === 'number' ? lat.toFixed(2) : 'unknown';
+      const lonStr = typeof lon === 'number' ? lon.toFixed(2) : 'unknown';
+      onAlert?.(`CPM ${value} at [${latStr}, ${lonStr}]`, severity, { lat, lon });
     });
   }, [getLevelFromValue, onAlert]);
   // -----------------------------------------------------------
