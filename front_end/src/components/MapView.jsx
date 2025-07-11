@@ -6,10 +6,20 @@ import { getCircleColor, getCircleRadius, getLevelFromValue } from "../utils/map
 import { useDataStats } from "../hooks/useDatastats";
 import { useMapClick, usePointerCursor } from "../utils/mapInteractions";
 import InfoPopup from "./InfoPopup";
+import axios from "axios";
 
-
-export default function MapView({ userLocation, setUserLocation, threshold, playbackSpeed, filterLevel, onAlert, setConnectionStatus, setDataStats }) {
-
+export default function MapView({
+  userLocation,
+  setUserLocation,
+  threshold,
+  playbackSpeed,
+  setAlertMessages,
+  levelFilter,
+  filterLevel,
+  onAlert,
+  setConnectionStatus,
+  setDataStats
+}) {
   const mapRef = useRef();
 
   const [geojson, setGeojson] = useState({
@@ -22,26 +32,24 @@ export default function MapView({ userLocation, setUserLocation, threshold, play
     longitude: 0,
     zoom: 2,
   });
-  
-  // state to track clicked point on the map
-  const [selectedPoint, setSelectedPoint] = useState(null);
-console.log("########selectedPoint ", selectedPoint);
-  // color mapping for radiation levels
+
+  const thresholdRef = useRef(threshold);
+  useEffect(() => {
+    thresholdRef.current = threshold;
+  }, [threshold]);
+
+  // Only use the utility once (no duplicate color code)
   const circleColor = useMemo(() => getCircleColor(), []);
   const circleRadius = useMemo(() => getCircleRadius(), []);
+  const [selectedPoint, setSelectedPoint] = useState(null);
 
-  // mouse interaction hooks for the map
   const onMouseMove = usePointerCursor(mapRef);
   const onMapClick  = useMapClick(setSelectedPoint);
-
-  // hook to set up data statistics
   useDataStats(geojson, setDataStats);
 
-
-  // Filter geojson based on filterLevel
+  // --- CLUSTERING + FILTER BY LEVEL ---
   const filteredGeojson = useMemo(() => {
-    if (filterLevel === "all") return geojson;
-    
+    if (filterLevel === "all" || !filterLevel) return geojson;
     return {
       ...geojson,
       features: geojson.features.filter(feature => {
@@ -59,50 +67,65 @@ console.log("########selectedPoint ", selectedPoint);
     };
   }, [geojson, filterLevel]);
 
-
-  // Buffer and add incoming data points
+  // 🟢 --- ONLY POINTS ABOVE THRESHOLD ---
   const handleDataPoints = useCallback((points) => {
-      const newFeatures = points.map((d) => ({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [d.lon, d.lat] },
-        properties: {
-          ...d,
-          level: getLevelFromValue(d.value),
-          timestamp: new Date().toISOString(),
-        },
-      }));
-      setGeojson((gj) => ({
-        ...gj,
-        features: [...gj.features, ...newFeatures].slice(-2000),
-      }));
-    }, [getLevelFromValue]
-  );
+    const filteredPoints = points.filter(d => d.value >= thresholdRef.current);
 
+    const newFeatures = filteredPoints.map((d) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [d.lon, d.lat] },
+      properties: {
+        ...d,
+        level: getLevelFromValue(d.value),
+        timestamp: new Date().toISOString(),
+      },
+    }));
+
+    setGeojson((gj) => ({
+      ...gj,
+      features: [...gj.features, ...newFeatures].slice(-2000),
+    }));
+
+    // Alert for above-threshold points
+    filteredPoints.forEach(({ value, lat, lon }) => {
+      if (value >= thresholdRef.current) {
+        const severity = value >= thresholdRef.current * 2 ? 'critical' : 'warning';
+        onAlert?.(`CPM ${value} at [${lat?.toFixed(2)}, ${lon?.toFixed(2)}]`, severity, { lat, lon });
+      }
+    });
+  }, [getLevelFromValue, onAlert]);
+  // -----------------------------------------------------------
 
   const handleConnectionStatus = useCallback((status) => {
-      setConnectionStatus(status);
-    }, [setConnectionStatus]
-  );
+    setConnectionStatus(status);
+  }, [setConnectionStatus]);
 
-
-  const handleAlert = useCallback((message, value, lat, lon) => {
-    const severity = value >= threshold * 2 ? 'critical' : 'warning';
-    onAlert(message, severity, { lat, lon });
-  }, [onAlert, threshold]);
-
-
-  // Use custom WebSocket hook
+  // --- WebSocket integration (no change) ---
   useWebSocket({
     wsUrl: import.meta.env.VITE_WS_URL,
     playbackSpeed,
     threshold,
     onDataPoints: handleDataPoints,
     onConnectionStatus: handleConnectionStatus,
-    onAlert: handleAlert,
+    onAlert,
   });
 
+  // --- Playback speed sent to backend ---
+  useEffect(() => {
+    async function updateBackendSpeed() {
+      try {
+        await axios.post("http://localhost:8000/api/playback_speed", {
+          playback_speed: playbackSpeed
+        });
+      } catch (err) {
+        console.warn("Failed to update playback speed:", err);
+      }
+    }
+    updateBackendSpeed();
+  }, [playbackSpeed]);
+  // ------------------------------------------------------------
 
-  // Obtain user's geolocation once
+  // --- User location logic (no change) ---
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -119,9 +142,7 @@ console.log("########selectedPoint ", selectedPoint);
       );
     }
   }, [setUserLocation]);
-  
 
-  // Pan map to user location when provided
   useEffect(() => {
     if (userLocation) {
       setViewState({
@@ -132,7 +153,7 @@ console.log("########selectedPoint ", selectedPoint);
     }
   }, [userLocation]);
 
-
+  // ---------------------- RETURN --------------------------
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <Map
@@ -144,12 +165,49 @@ console.log("########selectedPoint ", selectedPoint);
         style={{ width: "100vw", height: "100vh" }}
         mapStyle="mapbox://styles/mapbox/light-v10"
         mapboxAccessToken={import.meta.env.VITE_MAPBOX_TOKEN}
-        interactiveLayerIds={["radiation-points"]}
+        interactiveLayerIds={["clusters", "radiation-points"]}
       >
-        <Source id="radiation" type="geojson" data={filteredGeojson}>
+        <Source
+          id="radiation"
+          type="geojson"
+          data={filteredGeojson}
+          cluster={true}
+          clusterMaxZoom={14}
+          clusterRadius={50}
+        >
+          {/* --- Clustered circles --- */}
+          <Layer
+            id="clusters"
+            type="circle"
+            filter={["has", "point_count"]}
+            paint={{
+              "circle-color": "#36a2eb",
+              "circle-radius": [
+                "step",
+                ["get", "point_count"],
+                20, 100, 30, 750, 40
+              ],
+              "circle-stroke-width": 1,
+              "circle-stroke-color": "#fff",
+              "circle-opacity": 0.7
+            }}
+          />
+          {/* --- Cluster counts --- */}
+          <Layer
+            id="cluster-count"
+            type="symbol"
+            filter={["has", "point_count"]}
+            layout={{
+              "text-field": "{point_count_abbreviated}",
+              "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
+              "text-size": 14,
+            }}
+          />
+          {/* --- Unclustered points --- */}
           <Layer
             id="radiation-points"
             type="circle"
+            filter={["!", ["has", "point_count"]]}
             paint={{
               "circle-radius": circleRadius,
               "circle-color": circleColor,
@@ -160,6 +218,7 @@ console.log("########selectedPoint ", selectedPoint);
           />
         </Source>
 
+        {/* User location marker */}
         {userLocation && (
           <Marker
             latitude={userLocation.latitude}
@@ -168,6 +227,7 @@ console.log("########selectedPoint ", selectedPoint);
           />
         )}
 
+        {/* Popup on click */}
         {selectedPoint && (
           <InfoPopup
             timestamp={selectedPoint.properties.timestamp}
