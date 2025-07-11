@@ -48,11 +48,11 @@ function AlertToast({ alert, onDismiss }) {
         <p className={`text-sm font-medium ${config.textColor}`}>
           {alert.message}
         </p>
-        {alert.location && (
-          <p className="text-xs text-gray-500 mt-1">
-            {alert.location.lat.toFixed(4)}, {alert.location.lon.toFixed(4)}
-          </p>
-        )}
+        <p className="text-xs text-gray-500 mt-1">
+          {alert.location
+            ? `${alert.location.lat.toFixed(4)}, ${alert.location.lon.toFixed(4)}`
+            : "General alert"}
+        </p>
         <p className="text-xs text-gray-400 mt-1">
           {new Date(alert.timestamp).toLocaleTimeString()}
         </p>

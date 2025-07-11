@@ -57,11 +57,18 @@ export function useWebSocket({
                     !isNaN(value)
                 ) {
                     if (value >= thresholdRef.current) {
+                        // Determine severity based on radiation level
+                        const severity =
+                            value >= 100
+                                ? "critical"
+                                : value >= 50
+                                ? "warning"
+                                : "info";
+
                         onAlert(
-                            `High radiation: ${value} CPM`,
-                            value,
-                            lat,
-                            lon
+                            `High radiation detected: ${value} CPM`,
+                            severity,
+                            { lat, lon }
                         );
                     }
                     const dataPoint = { ...msg, lat, lon, value };

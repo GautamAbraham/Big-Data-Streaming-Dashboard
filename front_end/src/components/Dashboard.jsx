@@ -55,7 +55,7 @@ export default function Dashboard({ children }) {
         <h4 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>Data Statistics</h4>
         <div>Total Points: {stats.totalPoints}</div>
         <div>Dangerous Points: {stats.dangerousPoints}</div>
-        <div>Average Radiation: {stats.averageRadiation.toFixed(2)} CPM</div>
+        <div>Average Radiation: {(stats.averageRadiation || 0).toFixed(2)} CPM</div>
         {stats.lastUpdate && (
           <div style={{ fontSize: '10px', marginTop: '8px', color: '#ccc' }}>
             Last Update: {new Date(stats.lastUpdate).toLocaleTimeString()}
