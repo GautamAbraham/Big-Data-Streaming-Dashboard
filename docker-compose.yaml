@@ -138,7 +138,8 @@ services:
         execution.checkpointing.interval: 2min
         state.backend.incremental: true
         taskmanager.memory.managed.fraction: 0.4
-        state.backend.type: rocksdb
+        state.backend: rocksdb
+        execution.runtime-mode: streaming
     command: jobmanager
     depends_on:
       kafka:
@@ -170,8 +171,9 @@ services:
         execution.checkpointing.enabled: true
         execution.checkpointing.interval: 2min
         state.backend.incremental: true
-        state.backend.type: rocksdb
+        state.backend: rocksdb
         taskmanager.memory.managed.fraction: 0.4
+        execution.runtime-mode: streaming
     command: taskmanager
     deploy:
       resources:
