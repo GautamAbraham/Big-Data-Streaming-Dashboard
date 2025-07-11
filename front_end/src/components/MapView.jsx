@@ -67,11 +67,10 @@ export default function MapView({
     };
   }, [geojson, filterLevel]);
 
-  // 🟢 --- ONLY POINTS ABOVE THRESHOLD ---
+  // Buffer and add incoming data points - SHOW ALL POINTS ON MAP
   const handleDataPoints = useCallback((points) => {
-    const filteredPoints = points.filter(d => d.value >= thresholdRef.current);
-
-    const newFeatures = filteredPoints.map((d) => ({
+    // Create features for ALL points (don't filter by threshold for map display)
+    const newFeatures = points.map((d) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [d.lon, d.lat] },
       properties: {
@@ -81,17 +80,19 @@ export default function MapView({
       },
     }));
 
-    setGeojson((gj) => ({
-      ...gj,
-      features: [...gj.features, ...newFeatures].slice(-2000),
-    }));
+    setGeojson((gj) => {
+      const updated = {
+        ...gj,
+        features: [...gj.features, ...newFeatures].slice(-2000),
+      };
+      return updated;
+    });
 
-    // Alert for above-threshold points
-    filteredPoints.forEach(({ value, lat, lon }) => {
-      if (value >= thresholdRef.current) {
-        const severity = value >= thresholdRef.current * 2 ? 'critical' : 'warning';
-        onAlert?.(`CPM ${value} at [${lat?.toFixed(2)}, ${lon?.toFixed(2)}]`, severity, { lat, lon });
-      }
+    // Alert ONLY for above-threshold points (separate from map display)
+    const alertPoints = points.filter(d => d.value >= thresholdRef.current);
+    alertPoints.forEach(({ value, lat, lon }) => {
+      const severity = value >= thresholdRef.current * 2 ? 'critical' : 'warning';
+      onAlert?.(`CPM ${value} at [${lat?.toFixed(2)}, ${lon?.toFixed(2)}]`, severity, { lat, lon });
     });
   }, [getLevelFromValue, onAlert]);
   // -----------------------------------------------------------
