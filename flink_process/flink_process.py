@@ -210,7 +210,7 @@ def main():
         watermark_out_of_orderness_seconds = config['DEFAULT'].getint('WATERMARK_OUT_OF_ORDERNESS_SECONDS', 5)
         
         # Parallelism settings
-        parallelism = config['DEFAULT'].getint('GLOBAL_PARALLELISM', 3)
+        parallelism = config['DEFAULT'].getint('GLOBAL_PARALLELISM', 4)
         env.set_parallelism(parallelism)
         
         logging.info(f"Starting Flink 2.0 Radiation Monitoring")

@@ -132,7 +132,7 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
-        taskmanager.numberOfTaskSlots: 3
+        taskmanager.numberOfTaskSlots: 4
         jobmanager.memory.process.size: 1024m
         taskmanager.memory.process.size: 2048m
         execution.checkpointing.interval: 2min
@@ -165,7 +165,7 @@ services:
       - |
         FLINK_PROPERTIES=
         jobmanager.rpc.address: jobmanager
-        taskmanager.numberOfTaskSlots: 3
+        taskmanager.numberOfTaskSlots: 4
         jobmanager.memory.process.size: 1024m
         taskmanager.memory.process.size: 2048m
         execution.checkpointing.enabled: true
