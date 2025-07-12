@@ -3,17 +3,19 @@ from pyflink.datastream.connectors.kafka import KafkaSource, KafkaSink, KafkaRec
 from pyflink.datastream.connectors.kafka import KafkaOffsetsInitializer
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.typeinfo import Types
-from pyflink.datastream.functions import MapFunction, ProcessWindowFunction
+from pyflink.datastream.functions import MapFunction, ProcessWindowFunction, RuntimeContext
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
-from pyflink.datastream.window import TumblingEventTimeWindows, TumblingProcessingTimeWindows
+from pyflink.datastream.window import TumblingEventTimeWindows
 from pyflink.common.time import Time, Duration
+from pyflink.datastream.state import ValueStateDescriptor
+from pyflink.datastream.functions import KeyedProcessFunction
 import json
 import logging
 import configparser
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -239,9 +241,45 @@ def main():
         .with_idleness(Duration.of_seconds(30))
     
     raw_stream = env.from_source(kafka_source, watermark_strategy, "Kafka Source")
-    
+
+    # Deduplicate using key_by and stateful ProcessFunction
+    def dedup_key_selector(value):
+        """
+        Generate a unique key for deduplication based on normalized fields.
+        Returns a string key or 'invalid_key' if parsing fails.
+        """
+        try:
+            data = json.loads(value)
+            lat = round(float(data.get('latitude', 0)), 5)
+            lon = round(float(data.get('longitude', 0)), 5)
+            val = round(float(data.get('value', 0)), 2)
+            ts = str(data.get('captured_time', ''))
+            unit = str(data.get('unit', ''))
+            return f"{lat}|{lon}|{val}|{ts}|{unit}"
+        except Exception as e:
+            logging.warning(f"Deduplication key parse error: {e}")
+            return "invalid_key"
+
+    class DeduplicateProcessFunction(KeyedProcessFunction):
+        """
+        Flink KeyedProcessFunction for per-key deduplication using managed state.
+        Emits only the first occurrence of each unique key.
+        """
+        def open(self, runtime_context: RuntimeContext):
+            state_desc = ValueStateDescriptor("seen", Types.BOOLEAN())
+            self.seen_state = runtime_context.get_state(state_desc)
+
+        def process_element(self, value, ctx):
+            if not self.seen_state.value():
+                self.seen_state.update(True)
+                yield value
+
+    deduped_stream = raw_stream.key_by(dedup_key_selector, key_type=Types.STRING()) \
+        .process(DeduplicateProcessFunction(), output_type=Types.STRING()) \
+        .name("Deduplicate Records (Keyed State)")
+
     # Process data
-    processed_stream = raw_stream.map(
+    processed_stream = deduped_stream.map(
         RadiationDataProcessor(danger_threshold, low_threshold, moderate_threshold),
         output_type=Types.STRING()
     ).name("Radiation Data Processor")
