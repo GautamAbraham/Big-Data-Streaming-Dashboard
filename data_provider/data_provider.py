@@ -131,8 +131,23 @@ def send_data_from_csv(producer: KafkaProducer, topic: str, csv_file_path: str, 
                         'ingestion_timestamp': int(time.time() * 1000)  # Add ingestion time for monitoring
                     }
 
-                    # FAST SEND - No validation overhead
-                    producer.send(topic, value=data)
+                    # Use a deduplication key matching Flink's logic: lat|lon|val|captured_time|unit
+                    try:
+                        lat = round(float(data['latitude']), 5)
+                    except Exception:
+                        lat = 0.0
+                    try:
+                        lon = round(float(data['longitude']), 5)
+                    except Exception:
+                        lon = 0.0
+                    try:
+                        val = round(float(data['value']), 2)
+                    except Exception:
+                        val = 0.0
+                    ts = str(data.get('captured_time', ''))
+                    unit = str(data.get('unit', ''))
+                    key_str = f"{lat}|{lon}|{val}|{ts}|{unit}"
+                    producer.send(topic, key=key_str.encode('utf-8'), value=data)
                     stats['sent_rows'] += 1
 
                     # OPTIONAL: Minimal rate limiting for very high throughput
