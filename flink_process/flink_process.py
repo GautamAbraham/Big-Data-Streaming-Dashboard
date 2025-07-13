@@ -187,6 +187,8 @@ def main():
     """
     # Initialize Flink environment
     env = StreamExecutionEnvironment.get_execution_environment()
+    # Enable checkpointing every 2 minutes (120000 ms)
+    env.enable_checkpointing(120000)
     
     # Load configuration
     config = load_config()
