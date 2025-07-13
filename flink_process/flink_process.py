@@ -1,32 +1,27 @@
-"""
-FLINK 2.0 RADIATION MONITORING PIPELINE
-Clean implementation with minimal dependencies and proper Flink 2.0 APIs
-"""
-
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.connectors.kafka import KafkaSource, KafkaSink, KafkaRecordSerializationSchema
 from pyflink.datastream.connectors.kafka import KafkaOffsetsInitializer
 from pyflink.common.serialization import SimpleStringSchema
 from pyflink.common.typeinfo import Types
-from pyflink.datastream.functions import MapFunction, ProcessWindowFunction
+from pyflink.datastream.functions import MapFunction, ProcessWindowFunction, RuntimeContext
 from pyflink.common.watermark_strategy import WatermarkStrategy, TimestampAssigner
-from pyflink.datastream.window import TumblingEventTimeWindows, TumblingProcessingTimeWindows
+from pyflink.datastream.window import TumblingEventTimeWindows
 from pyflink.common.time import Time, Duration
+from pyflink.datastream.state import ValueStateDescriptor
+from pyflink.datastream.functions import KeyedProcessFunction
 import json
 import logging
 import configparser
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TemporalOrderingProcessor(ProcessWindowFunction):
     """
-    TEMPORAL ORDERING PROCESSOR - PROJECT REQUIREMENT COMPLIANCE
-    
     Implements: "all location information with the same timestamp 
     need to be submitted at the same time"
     
@@ -34,31 +29,24 @@ class TemporalOrderingProcessor(ProcessWindowFunction):
     """
     
     def process(self, key, context, elements):
-        """Process all elements with the same timestamp together - PyFlink 2.0 API"""
         try:
             # Convert iterator to list to process all elements with same timestamp
             element_list = list(elements)
             timestamp_key = key
-            window_start = context.window().start
-            
-            logging.info(f"TEMPORAL ORDERING: Processing {len(element_list)} records with timestamp {timestamp_key}")
             
             # Process all elements with the same timestamp simultaneously
             batch_output = []
             for element in element_list:
                 try:
                     data = json.loads(element)
-                    # Add temporal ordering metadata for compliance
                     data["temporal_batch_size"] = len(element_list)
-                    data["temporal_window"] = window_start
+                    data["timestamp_key"] = timestamp_key
                     data["temporal_ordering"] = "compliant"
                     
                     batch_output.append(json.dumps(data))
                 except Exception as e:
                     logging.warning(f"Error processing element in temporal batch: {e}")
             
-            # Return all elements from the same timestamp together
-            logging.info(f"TEMPORAL BATCH COMPLETE: {len(batch_output)} records sent together")
             return batch_output
             
         except Exception as e:
@@ -74,33 +62,26 @@ def extract_timestamp_from_data(json_str: str) -> int:
         if "timestamp" in data:
             timestamp_str = data["timestamp"]
         else:
-            return int(time.time() * 1000)  # Current time as fallback
+            return None # no timestamp found, return None
             
         try:
-            # Handle timestamp formats for temporal grouping
+            # Normalize timestamp string: remove timezone and microseconds
             clean_timestamp = str(timestamp_str)
-            
-            # Remove timezone info (+00:00, Z)
             if '+' in clean_timestamp:
                 clean_timestamp = clean_timestamp.split('+')[0]
             elif 'Z' in clean_timestamp:
                 clean_timestamp = clean_timestamp.replace('Z', '')
-            
-            # Remove microseconds (.571000) 
             if '.' in clean_timestamp:
                 clean_timestamp = clean_timestamp.split('.')[0]
-            
             # Parse timestamp and convert to milliseconds for Flink
             dt = datetime.strptime(clean_timestamp, '%Y-%m-%d %H:%M:%S')
-            return int(dt.timestamp() * 1000)  # Flink uses milliseconds
-            
-        except Exception as e:
-            logging.warning(f"Failed to parse timestamp: {timestamp_str}, error: {e}")
-            return int(time.time() * 1000)  # Current time as fallback
+            return int(dt.timestamp() * 1000)
+        except Exception:
+            return None # no timestamp found, return None
             
     except Exception as e:
         logging.error(f"JSON parsing failed in timestamp extraction: {e}")
-        return int(time.time() * 1000)  # Current time as fallback
+        return None # no timestamp found, return None
 
 class RadiationTimestampAssigner(TimestampAssigner):
     """Custom timestamp assigner for temporal ordering"""
@@ -111,7 +92,7 @@ class RadiationTimestampAssigner(TimestampAssigner):
 
 class RadiationDataProcessor(MapFunction):
     """
-    Single-pass radiation data processor for Flink 2.0
+    Single-pass radiation data processor
     - Validates input data
     - Enriches with radiation level classification
     - Tags for routing (valid/invalid/critical)
@@ -124,7 +105,7 @@ class RadiationDataProcessor(MapFunction):
         self.required_fields = {'latitude', 'longitude', 'value', 'captured_time', 'unit'}
         
     def map(self, value):
-        """Process radiation data in single pass"""
+        """Process radiation data"""
         try:
             # Parse JSON
             data = json.loads(value)
@@ -170,9 +151,8 @@ class RadiationDataProcessor(MapFunction):
             enriched = {
                 "status": "valid",
                 "timestamp": data["captured_time"],
-                # "processing_time": int(time.time() * 1000),
-                "lat": round(lat, 6),
-                "lon": round(lon, 6),
+                "lat": round(lat, 5),
+                "lon": round(lon, 5),
                 "value": radiation_value,
                 "unit": "cpm",
                 "level": level,
@@ -203,10 +183,12 @@ def load_config():
 
 def main():
     """
-    Main Flink 2.0 radiation monitoring pipeline
+    Main Flink radiation monitoring pipeline
     """
     # Initialize Flink environment
     env = StreamExecutionEnvironment.get_execution_environment()
+    # Enable checkpointing every 2 minutes (120000 ms)
+    env.enable_checkpointing(120000)
     
     # Load configuration
     config = load_config()
@@ -233,17 +215,18 @@ def main():
         parallelism = config['DEFAULT'].getint('GLOBAL_PARALLELISM', 4)
         env.set_parallelism(parallelism)
         
-        logging.info(f"Starting Flink 2.0 Radiation Monitoring")
+        logging.info(f"Starting Flink Radiation Monitoring")
         logging.info(f"Thresholds - Danger: {danger_threshold}, Low: {low_threshold}, Moderate: {moderate_threshold}")
         logging.info(f"Temporal Ordering: {'ENABLED' if enable_temporal_ordering else 'DISABLED'} (Window: {temporal_window_seconds}s)")
         logging.info(f"Watermark Tolerance: {watermark_out_of_orderness_seconds}s for out-of-order data")
         logging.info(f"Kafka - Input: {kafka_topic}, Output: {kafka_output_topic}, Critical: {kafka_critical_topic}")
         
     except KeyError as e:
+        # Critical configuration missing, exit
         logging.error(f"Missing configuration: {e}")
         sys.exit(1)
     
-    # Create Kafka source (Flink 2.0 API)
+    # Create Kafka source
     kafka_source = KafkaSource.builder() \
         .set_bootstrap_servers(kafka_bootstrap_servers) \
         .set_topics(kafka_topic) \
@@ -253,16 +236,52 @@ def main():
         .build()
     
     # Create data stream with event-time watermarks for out-of-order data  
-    # Use proper bounded out-of-orderness strategy for PyFlink 2.0
+    # Use proper bounded out-of-orderness strategy
     # Allow 5 seconds for out-of-order events
     watermark_strategy = WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(5)) \
         .with_timestamp_assigner(RadiationTimestampAssigner()) \
         .with_idleness(Duration.of_seconds(30))
     
     raw_stream = env.from_source(kafka_source, watermark_strategy, "Kafka Source")
-    
+
+    # Deduplicate using key_by and stateful ProcessFunction
+    def dedup_key_selector(value):
+        """
+        Generate a unique key for deduplication based on normalized fields.
+        Returns a string key or 'invalid_key' if parsing fails.
+        """
+        try:
+            data = json.loads(value)
+            lat = round(float(data.get('latitude', 0)), 5)
+            lon = round(float(data.get('longitude', 0)), 5)
+            val = round(float(data.get('value', 0)), 2)
+            ts = str(data.get('captured_time', ''))
+            unit = str(data.get('unit', ''))
+            return f"{lat}|{lon}|{val}|{ts}|{unit}"
+        except Exception as e:
+            logging.warning(f"Deduplication key parse error: {e}")
+            return "invalid_key"
+
+    class DeduplicateProcessFunction(KeyedProcessFunction):
+        """
+        Flink KeyedProcessFunction for per-key deduplication using managed state.
+        Emits only the first occurrence of each unique key.
+        """
+        def open(self, runtime_context: RuntimeContext):
+            state_desc = ValueStateDescriptor("seen", Types.BOOLEAN())
+            self.seen_state = runtime_context.get_state(state_desc)
+
+        def process_element(self, value, ctx):
+            if not self.seen_state.value():
+                self.seen_state.update(True)
+                yield value
+
+    deduped_stream = raw_stream.key_by(dedup_key_selector, key_type=Types.STRING()) \
+        .process(DeduplicateProcessFunction(), output_type=Types.STRING()) \
+        .name("Deduplicate Records (Keyed State)")
+
     # Process data
-    processed_stream = raw_stream.map(
+    processed_stream = deduped_stream.map(
         RadiationDataProcessor(danger_threshold, low_threshold, moderate_threshold),
         output_type=Types.STRING()
     ).name("Radiation Data Processor")
@@ -272,7 +291,6 @@ def main():
         logging.info("TEMPORAL ORDERING ENABLED: Event-time grouping with late data tolerance")
         logging.info(f"Window: {temporal_window_seconds}s, Late data tolerance: {watermark_out_of_orderness_seconds}s")
         
-        # Simplified temporal ordering approach - group by timestamp without watermarks
         # Filter valid data for temporal ordering
         valid_processed_data = processed_stream.filter(lambda x: '"status": "valid"' in x)
         
@@ -282,7 +300,7 @@ def main():
             try:
                 data = json.loads(json_str)
                 timestamp_str = data.get("timestamp", "unknown")
-                # Group by second (remove microseconds for grouping)
+                # Group by second
                 if isinstance(timestamp_str, str) and len(timestamp_str) > 19:
                     return timestamp_str[:19]  # YYYY-MM-DD HH:MM:SS
                 return str(timestamp_str)
@@ -305,14 +323,7 @@ def main():
         logging.info("TEMPORAL ORDERING DISABLED: Standard stream processing")
         final_stream = processed_stream
     
-    # Filter streams by status (from final stream - either temporally ordered or standard)
-    def is_valid(json_str):
-        try:
-            data = json.loads(json_str)
-            return data.get("status") == "valid"
-        except:
-            return False
-    
+    # Filter streams by status from final stream    
     def is_invalid(json_str):
         try:
             data = json.loads(json_str) 
@@ -335,12 +346,11 @@ def main():
             return False
     
     # Split streams
-    valid_stream = final_stream.filter(is_valid).name("Valid Data Filter")
     invalid_stream = final_stream.filter(is_invalid).name("Invalid Data Filter")
     critical_stream = final_stream.filter(is_critical).name("Critical Data Filter")
     normal_stream = final_stream.filter(is_normal).name("Normal Data Filter")
     
-    # Create Kafka sinks (Flink 2.0 API) - Each sink needs unique transactional ID prefix
+    # Create Kafka sinks with unique transactional ID prefix
     normal_sink = KafkaSink.builder() \
         .set_bootstrap_servers(kafka_bootstrap_servers) \
         .set_record_serializer(
