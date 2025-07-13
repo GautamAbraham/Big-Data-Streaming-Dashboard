@@ -76,7 +76,7 @@ React Frontend (Mapbox visualization)
 -   Multi-topic Kafka output for clean, critical, and dirty data.
 -   WebSocket-based backend/frontend communication.
 -   Docker Compose orchestration for easy deployment.
--   Health checks and monitoring (Kafka UI, Flink UI, Prometheus-ready).
+-   Health checks and monitoring (Kafka UI, Flink UI).
 
 ---
 
