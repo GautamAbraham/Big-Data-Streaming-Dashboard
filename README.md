@@ -1,422 +1,129 @@
-# Real-Time Radiation Data Visualization System
+# Real-Time Radiation Data Streaming & Visualization System
 
-## Architecture Overview
+## Overview
 
-This system provides real-time visualization of radiation data using a modern streaming architecture:
+This project demonstrates a complete, production-style streaming data pipeline. It covers:
+
+-   Real-time data ingestion from CSV to Kafka
+-   Distributed messaging and partitioning with Kafka
+-   Stateful, parallel stream processing and enrichment with Flink
+-   Multi-stream output (clean, critical, dirty data) for robust data quality and alerting
+-   Real-time API and WebSocket broadcasting with FastAPI
+-   Live, interactive visualization with a modern React/Mapbox frontend
+
+## Architecture
 
 ```
-Data Provider → Kafka → Flink → Kafka → FastAPI → WebSocket → React Frontend
+Data Provider (CSV → Kafka)
+   ↓
+Kafka (radiation-data topic)
+   ↓
+Flink (validation, enrichment, deduplication, multi-stream output)
+   ↓
+Kafka (processed-data-output, critical-data, dirty-data)
+   ↓
+FastAPI Backend (WebSocket API)
+   ↓
+React Frontend (Mapbox visualization)
 ```
 
-### Components:
+## Components
 
-1. **Data Provider**: Reads CSV data and streams to Kafka
-2. **Apache Kafka**: Message broker for data streaming
-3. **Apache Flink**: Stream processing for data validation and enrichment
-4. **FastAPI Backend**: WebSocket server for real-time frontend updates
-5. **React Frontend**: Interactive map visualization with Mapbox
+### 1. Data Provider (`data_provider/`)
+
+-   Reads large CSV files in chunks.
+-   Streams records to Kafka (`radiation-data` topic) with a composite key for partitioning.
+-   Configurable batch size and send delay for throughput control.
+-   Uses Python's `kafka-python` and pandas.
+
+### 2. Kafka (`docker-compose.yaml`)
+
+-   Central message broker.
+-   Configured for multiple partitions for parallelism.
+-   Exposes UI for monitoring (Kafka UI).
+
+### 3. Flink Stream Processor (`flink_process/`)
+
+-   Consumes from Kafka.
+-   Deduplicates, validates, and enriches data.
+-   Splits output into:
+    -   `processed-data-output` (valid, normal data)
+    -   `critical-data` (dangerous readings)
+    -   `dirty-data` (invalid/corrupt records)
+-   Uses event-time processing and temporal ordering.
+-   Parallelism and checkpointing are configurable.
+
+### 4. Backend API (`backend/`)
+
+-   FastAPI server.
+-   Consumes processed Kafka topics.
+-   Broadcasts data to frontend via WebSocket.
+-   Health check endpoint for monitoring.
+
+### 5. Frontend (`front_end/`)
+
+-   React + Vite + Mapbox.
+-   Real-time map visualization of radiation data.
+-   Receives data via WebSocket.
+-   UI components for alerts, system status, and configuration.
+
+---
 
 ## Key Features
 
--   ✅ Real-time data streaming and processing
--   ✅ Interactive map visualization with radiation levels
--   ✅ Data validation and enrichment in Flink
--   ✅ WebSocket connection with auto-reconnect
--   ✅ System monitoring and health checks
--   ✅ Containerized deployment with Docker
--   ✅ Production-ready configuration with monitoring
+-   Real-time, end-to-end streaming from CSV to interactive map.
+-   Data validation, deduplication, and enrichment in Flink.
+-   Multi-topic Kafka output for clean, critical, and dirty data.
+-   WebSocket-based backend/frontend communication.
+-   Docker Compose orchestration for easy deployment.
+-   Health checks and monitoring (Kafka UI, Flink UI, Prometheus-ready).
 
-## Quick Start
+---
 
-### Prerequisites
+## How to Run
 
--   Docker & Docker Compose
--   Mapbox access token (get from https://mapbox.com)
-
-### Quick Start (Recommended)
-
-**For Windows users**, use the deployment scripts:
-
-```batch
-# Development deployment (optimized for 4 vCPUs, 8GB RAM)
-.\deploy_scaled_system.bat
-
-# Production deployment
-.\deploy_production.bat
-```
-
-**For Linux/Mac users**:
-
-```bash
-# Development
-docker-compose up --build
-
-# Production
-docker-compose -f docker-compose.prod.yaml up --build
-```
-
-### Development Setup
-
-1. **Clone and navigate to project**:
-
-    ```bash
-    cd path/to/project
-    ```
-
-2. **Set up environment variables**:
-
-    ```bash
-    # Ensure front_end/.env exists with correct values
-    # The .env file should contain:
-    # VITE_MAPBOX_TOKEN=your_mapbox_token
-    # VITE_API_URL=http://localhost:8000
-    # VITE_WS_URL=ws://localhost:8000/ws
-    ```
-
+1. **Clone the repository** and navigate to the project root.
+2. **Configure environment variables** in `front_end/.env` with the help of `.env.example` provided.
 3. **Start all services**:
-
-    ```bash
+    ```
     docker-compose up --build
     ```
-
-4. **Access the application**:
+4. **Access UIs**:
     - Frontend: http://localhost:3000
-    - Backend API: http://localhost:8000
     - Flink Dashboard: http://localhost:8081
+    - Kafka UI: http://localhost:8080
+    - Backend API: http://localhost:8000
 
-### Production Deployment
-
-**Windows users**:
-
-```batch
-.\deploy_production.bat
-```
-
-**Linux/Mac users**:
-
-```bash
-docker-compose -f docker-compose.prod.yaml up --build
-```
-
-```bash
-docker-compose -f docker-compose.prod.yaml up --build
-```
-
-Additional services in production:
-
--   Prometheus metrics: http://localhost:9090
--   Enhanced health checks and auto-restart
--   Data persistence with volumes
-
-## System Architecture Details
-
-### Data Flow
-
-1. **Data Ingestion**: CSV files are read and streamed to Kafka topic `radiation-data`
-2. **Stream Processing**: Flink processes data from `radiation-data` topic:
-    - Validates coordinates (lat/lon within bounds)
-    - Filters invalid records (unit must be 'cpm')
-    - Enriches with danger levels and timestamps
-    - **Multiple Output Streams**:
-        - `processed-data-output` → Clean, valid data for frontend
-        - `dirty-data` → Invalid/corrupted data for monitoring
-        - `late-data` → Late-arriving data for analysis
-3. **Real-time API**: FastAPI consumes processed data and broadcasts via WebSocket
-4. **Visualization**: React frontend connects to WebSocket and displays data on interactive map
-
-### Kafka Topics Architecture
-
-| Topic                   | Purpose                        | Consumer                | Priority     |
-| ----------------------- | ------------------------------ | ----------------------- | ------------ |
-| `radiation-data`        | Raw sensor data input          | Flink (source)          | N/A          |
-| `processed-data-output` | Clean, enriched normal data    | Backend → Frontend      | Normal       |
-| `critical-data`         | High-priority/dangerous alerts | Backend → Frontend      | **CRITICAL** |
-| `dirty-data`            | Invalid/corrupted records      | Monitoring systems      | Low          |
-| `late-data`             | Late-arriving measurements     | Data recovery workflows | Low          |
-
-This multi-topic approach ensures:
-
--   **Data Quality**: Clean separation of valid vs invalid data
--   **Priority Handling**: Critical radiation alerts are processed with higher priority
--   **Real-time Alerting**: Dangerous radiation levels trigger immediate notifications
--   **Monitoring**: Track data quality and rejection rates
--   **Auditing**: Complete data lineage and audit trail
--   **Recovery**: Handle late-arriving or missed data
-
-### Key Components Explained
-
-#### Flink Stream Processing
-
--   **Validation**: Ensures data quality (valid coordinates, positive values, correct units)
--   **Enrichment**: Adds danger level classification and processing timestamps
--   **Error Handling**: Logs and filters out invalid records
--   **Metrics**: Tracks processing statistics (valid/invalid record counts)
-
-#### Backend WebSocket Server
-
--   **Connection Management**: Handles multiple concurrent WebSocket connections
--   **Multi-Topic Consumption**: Consumes from both normal and critical data topics
--   **Error Recovery**: Auto-reconnect logic and connection health monitoring
--   **Data Broadcasting**: Efficiently sends data to all connected clients
--   **Priority Handling**: Tags critical data for frontend alerting
--   **Health Endpoint**: `/health` for monitoring system status
-
-#### Critical Data Sink & Alerting
-
-The system implements a dedicated **Critical Data Sink** for high-priority radiation alerts:
-
-**Critical Data Criteria:**
-
--   `dangerous = true` (radiation ≥ 100 CPM)
--   `level = "high"` (radiation ≥ 50 CPM)
-
-**Critical Data Features:**
-
--   **Dedicated Kafka Topic**: `critical-data` with optimized configuration
--   **Fast Delivery**: Smaller batch sizes (16KB) and minimal linger time (5ms)
--   **High Reliability**: More retries (5) and all-replica acknowledgment
--   **Priority Tagging**: Backend tags critical data with `"data_priority": "critical"`
--   **Enhanced Logging**: Critical alerts logged with INFO level for monitoring
--   **Frontend Integration**: Critical data can trigger special UI alerts/notifications
-
-**Configuration (Optimized for Speed):**
-
-```
-batch.size: 16384 (16KB for faster delivery)
-linger.ms: 5 (minimal delay)
-compression.type: snappy (fast compression)
-acks: all (maximum reliability)
-retries: 5 (enhanced fault tolerance)
-```
-
-#### Frontend Real-time Visualization
-
--   **Buffering Strategy**: Batches incoming data for smooth rendering
--   **Performance Optimization**: Limits displayed points and uses efficient updates
--   **Connection Status**: Shows real-time connection status and data statistics
--   **Interactive Map**: Color-coded radiation levels with zoom/pan capabilities
-
-## Monitoring & Observability
-
-### Built-in Monitoring
-
--   **System Monitor**: Real-time connection status and metrics
--   **Health Checks**: Docker health checks for all services
--   **Data Statistics**: Track processed points and radiation levels
--   **Connection Status**: WebSocket connection monitoring
-
-### Production Monitoring (with docker-compose.prod.yaml)
-
--   **Prometheus**: Metrics collection from Flink and backend
--   **Flink Metrics**: Processing rates, backpressure, checkpoints
--   **Service Health**: Automated health checks and restarts
-
-### Debugging Tips
-
-1. **Check Flink Processing**:
-
-    ```bash
-    # View Flink logs
-    docker-compose logs flink_process
-
-    # Access Flink UI
-    # http://localhost:8081
-    ```
-
-2. **Monitor Backend**:
-
-    ```bash
-    # View backend logs
-    docker-compose logs backend
-
-    # Check health endpoint
-    curl http://localhost:8000/health
-    ```
-
-3. **Frontend Debug**:
-    - Open browser console for WebSocket connection logs
-    - Check network tab for failed requests
-    - Monitor data statistics panel
+---
 
 ## Configuration
 
-### Environment Variables
+-   **Kafka**: Number of partitions, retention, and performance settings in `docker-compose.yaml`.
+-   **Flink**: Parallelism, checkpointing, and memory in `flink_process/config.ini` and Docker Compose.
+-   **Data Provider**: Batch size, send delay, and file path in `data_provider/config.ini`.
+-   **Frontend**: Mapbox and API URLs in `front_end/.env`.
 
-The project uses the `.env` file located in the `front_end/` directory for all environment variable configuration.
+---
 
-#### Frontend Environment Variables (`front_end/.env`)
+## Developer Notes
 
-```env
-VITE_MAPBOX_TOKEN=your_mapbox_token_here
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws
-```
+-   **Partitioning**: The data provider uses a composite key (lat, lon, value, timestamp, unit) to match Flink's deduplication logic, ensuring correct parallelism and stateful processing.
+-   **Consumer Offsets**: Flink manages Kafka consumer offsets using the group ID set in the Kafka source.
+-   **Monitoring**: Use Flink UI and Kafka UI for real-time system health and lag monitoring.
 
-**Setup Instructions**:
-
-1. Copy `front_end/.env.example` to `front_end/.env` (if not already present)
-2. Update the Mapbox token with your own token from https://mapbox.com
-3. Both development and production deployments use this single .env file
-
-#### Docker Environment Variable Handling
-
-The system uses **Option A: Direct .env Copy** approach for handling frontend environment variables:
-
-**Build-Time Variables:**
-
--   The frontend `Dockerfile` directly copies the `.env` file during the build process
--   Vite configuration loads and injects environment variables during build
--   Variables prefixed with `VITE_` are embedded into the built application
-
-**Runtime Variables:**
-
--   Docker Compose services use `env_file: ./front_end/.env` for runtime configuration
--   Both development (`docker-compose.yaml`) and production (`docker-compose.prod.yaml`) use the same .env file
--   No duplicate environment variable management required
-
-**Benefits:**
-
--   Single source of truth for all environment variables
--   No need to maintain separate .env files or Docker environment sections
--   Simplified deployment and configuration management
-
-#### Backend (config.ini)
-
-```ini
-[DEFAULT]
-KAFKA_TOPIC=processed-data-output
-KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-```
-
-### Performance Tuning
-
-#### For High Throughput:
-
-1. **Increase Flink Parallelism**:
-
-    ```yaml
-    # In docker-compose.prod.yaml
-    taskmanager.numberOfTaskSlots: 8
-    parallelism.default: 8
-    ```
-
-2. **Optimize Frontend Buffering**:
-
-    ```javascript
-    // In MapView.jsx
-    setInterval(() => {
-      // Process buffer
-    }, 50); // Reduce interval for faster updates
-    ```
-
-3. **Backend Optimization**:
-    - Increase Kafka consumer concurrency
-    - Add connection pooling
-    - Implement message batching
-
-## Data Format
-
-### Input Data (CSV)
-
-```csv
-lat,lon,value,unit,captured_at,device_id
-35.6762,139.6503,15.2,cpm,2024-01-01T12:00:00Z,device_001
-```
-
-### Processed Output (JSON)
-
-```json
-{
-  "timestamp": "2024-01-01T12:00:00+00:00",
-  "lat": 35.676200,
-  "lon": 139.650300,
-  "value": 15.20,
-  "unit": "cpm",
-  "level": "low",
-  "dangerous": false,
-  "device_id": "device_001",
-  "processed_at": "2024-01-01T12:00:01+00:00"
-}
-```
+---
 
 ## Troubleshooting
 
-### Common Issues
+-   **No data on map**: Check Flink and backend logs, ensure Kafka topics exist, verify WebSocket connection.
+-   **High consumer lag**: Check Flink parallelism, TaskManager count, and Kafka partitioning.
+-   **Data skew**: Ensure the data provider's key matches Flink's deduplication key.
 
-1. **No Data Appearing on Map**:
+---
 
-    - Check Kafka topics: `docker exec -it kafka kafka-topics --list --bootstrap-server localhost:9092`
-    - Verify Flink job is running: http://localhost:8081
-    - Check backend logs for WebSocket connections
+## End-Notes
 
-2. **WebSocket Connection Failed**:
+-   This project demonstrates a complete, production-style streaming data pipeline.
+-   It covers ingestion, distributed messaging, real-time processing, multi-stream output, and live visualization.
 
-    - Ensure backend is running: `curl http://localhost:8000/health`
-    - Check firewall/network settings
-    - Verify URL in frontend environment variables
-
-3. **High Memory Usage**:
-
-    - Reduce data retention in frontend (lower point limit)
-    - Increase Docker memory limits
-    - Optimize Flink checkpointing frequency
-
-4. **Data Loss/Lag**:
-    - Check Flink backpressure in dashboard
-    - Monitor Kafka consumer lag
-    - Increase processing parallelism
-
-## Development
-
-### Adding New Features
-
-1. **Data Enrichment**: Modify `EnhancedCleanKafkaJSON` in `flink_process.py`
-2. **Visualization**: Update `MapView.jsx` for new data fields
-3. **Monitoring**: Add metrics to `SystemMonitor.jsx`
-
-### Testing
-
-```bash
-# Run individual services for testing
-docker-compose up kafka backend
-docker-compose up frontend --build
-
-# Check service health
-curl http://localhost:8000/health
-```
-
-### Service Dependencies & Orchestration
-
-The system uses Docker Compose service dependencies to ensure proper startup order:
-
-**Dependency Chain:**
-
-```
-Kafka (with health check)
-  ↓
-┌─── Data Provider (waits for kafka healthy)
-├─── Flink JobManager (waits for kafka healthy)
-└─── Flink Processor (waits for kafka healthy + jobmanager started)
-         ↓
-    TaskManagers (wait for jobmanager started)
-         ↓
-    Backend (waits for jobmanager started)
-```
-
-**Benefits:**
-
--   ✅ **No Manual Waits**: Deployment scripts don't need `timeout` commands
--   ✅ **Automatic Retry**: Services auto-restart if dependencies fail
--   ✅ **Health Checks**: Kafka health check ensures it's ready before dependents start
--   ✅ **Parallel Startup**: Independent services start in parallel where possible
--   ✅ **Graceful Shutdown**: `docker-compose down` stops services in reverse dependency order
-
-**Health Check Configuration:**
-
--   Kafka includes `nc -z localhost 9092` health check
--   Services use `condition: service_healthy` for Kafka
--   Services use `condition: service_started` for other dependencies
-
-## License
-
-This project is for educational/research purposes. Ensure proper licensing for production use.
+---
