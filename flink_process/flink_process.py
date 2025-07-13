@@ -215,7 +215,7 @@ def main():
         parallelism = config['DEFAULT'].getint('GLOBAL_PARALLELISM', 4)
         env.set_parallelism(parallelism)
         
-        logging.info(f"Starting Flink 2.0 Radiation Monitoring")
+        logging.info(f"Starting Flink Radiation Monitoring")
         logging.info(f"Thresholds - Danger: {danger_threshold}, Low: {low_threshold}, Moderate: {moderate_threshold}")
         logging.info(f"Temporal Ordering: {'ENABLED' if enable_temporal_ordering else 'DISABLED'} (Window: {temporal_window_seconds}s)")
         logging.info(f"Watermark Tolerance: {watermark_out_of_orderness_seconds}s for out-of-order data")
