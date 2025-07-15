@@ -1,1 +1,0 @@
-Cloud deployed Application URL: http://34.61.73.255:3000/
