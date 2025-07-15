@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 function ConfigPanel({
   filterLevel,
   setFilterLevel,
@@ -6,6 +7,7 @@ function ConfigPanel({
   playbackSpeed,
   setPlaybackSpeed,
 }) {
+  const [localThreshold, setLocalThreshold] = useState(threshold);
   return (
     <aside className="w-72 bg-white border-r border-gray-100 h-full flex flex-col">
       <div className="flex-1 p-6 space-y-8 overflow-y-auto">
@@ -37,8 +39,13 @@ function ConfigPanel({
             </label>
             <input
               type="number"
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
+              value={localThreshold}
+              onChange={(e) => setLocalThreshold(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setThreshold(Number(localThreshold));
+                }
+              }}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-900 text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               placeholder="Enter threshold value"
             />

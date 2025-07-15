@@ -76,7 +76,7 @@ export default function MapView({
       properties: {
         ...d,
         level: getLevelFromValue(d.value),
-        timestamp: d.timestamp,
+        timestamp: new Date().toISOString(),
       },
     }));
 
@@ -175,7 +175,7 @@ export default function MapView({
           type="geojson"
           data={filteredGeojson}
           cluster={true}
-          clusterMaxZoom={7}
+          clusterMaxZoom={10}
           clusterRadius={50}
           clusterProperties={{
             // max_cpm will be the highest CPM value among points in the cluster
@@ -192,10 +192,10 @@ export default function MapView({
               "circle-color": [
                 "step",
                 ["get", "max_cpm"],
-                "#22c55e",   // < 20 CPM (green)
-                50, "#ea580c", // 50-100 CPM (orange)
-                200, "#dc2626", // >100 CPM (red)
-                1000, "#7f1d1d" // >1000 CPM (dark red, critical)
+                "#00e676",   // < 20 CPM (bright green)
+                50, "#ff9800", // 50-100 CPM (bright orange)
+                200, "#f44336", // >100 CPM (bright red)
+                1000, "#b71c1c" // >1000 CPM (dark red, critical)
               ],
               "circle-radius": [
                 "step",
@@ -204,7 +204,7 @@ export default function MapView({
               ],
               "circle-stroke-width": 1,
               "circle-stroke-color": "#fff",
-              "circle-opacity": 0.7
+              "circle-opacity": 0.9
             }}
           />
           {/* --- Cluster counts --- */}
@@ -228,27 +228,28 @@ export default function MapView({
                 "match",
                 ["get", "level"],
                 "low", 7,
-                "moderate", 10,
-                "high", 16,
-                6
+                "moderate", 8,
+                "high", 10,
+                "very-high", 12,
+                10
               ],
-              "circle-color": circleColor,
-              "circle-opacity": 0.8,
+              "circle-color": [
+                "match",
+                ["get", "level"],
+                "low", "#00e676",         // bright green
+                "moderate", "#ff9800",    // bright orange
+                "high", "#f44336",        // bright red
+                "very-high", "#b71c1c",   // dark red (critical)
+                "#2196f3"                 // bright blue (fallback)
+              ],
+              "circle-opacity": 1,
               "circle-stroke-width": [
                 "case",
-                ["==", ["get", "level"], "high"], 3,
-                1
+                ["==", ["get", "level"], "very-high"], 2.5,
+                1.5
               ],
-              "circle-stroke-color": [
-                "case",
-                ["==", ["get", "level"], "high"], "#fff",
-                "#222"
-              ],
-              "circle-blur": [
-                "case",
-                ["==", ["get", "level"], "high"], 0.5,
-                0
-              ]
+              "circle-stroke-color": "#fff",
+              "circle-blur": 0
             }}
           />
         </Source>

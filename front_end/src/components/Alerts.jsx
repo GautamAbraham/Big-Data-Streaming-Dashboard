@@ -2,7 +2,17 @@ import { X, AlertTriangle, AlertCircle, Info } from "lucide-react";
 
 function AlertToast({ alert, onDismiss }) {
   const getSeverityConfig = (severity) => {
-    switch (severity) {
+    // Normalize severity
+    let normalized = severity;
+    if (["critical", "danger", "high"].includes(severity)) {
+      normalized = "critical";
+    } else if (["warning", "warn", "low"].includes(severity)) {
+      normalized = "warning";
+    } else {
+      normalized = "warning"; // fallback to warning
+    }
+
+    switch (normalized) {
       case "critical":
         return {
           icon: AlertTriangle,
@@ -10,22 +20,17 @@ function AlertToast({ alert, onDismiss }) {
           iconColor: "text-red-600",
           textColor: "text-red-800",
           pulse: "animate-pulse",
+          dotColor: "#ea580c", // orange for critical
         };
       case "warning":
+      default:
         return {
           icon: AlertCircle,
           bgColor: "bg-yellow-50 border-yellow-200",
           iconColor: "text-yellow-600",
           textColor: "text-yellow-800",
           pulse: "",
-        };
-      default:
-        return {
-          icon: Info,
-          bgColor: "bg-blue-50 border-blue-200",
-          iconColor: "text-blue-600",
-          textColor: "text-blue-800",
-          pulse: "",
+          dotColor: "#dc2626", // red for warning
         };
     }
   };
